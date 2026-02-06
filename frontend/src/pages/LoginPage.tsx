@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { Lock, User, Server } from 'lucide-react';
+import logoImg from '../assets/logo.png';
 
 const LoginPage: React.FC = () => {
   const [serverAddress, setServerAddress] = useState('');
@@ -38,25 +39,23 @@ const LoginPage: React.FC = () => {
 
     try {
       setResolving(true);
-      // In main process resolveRedirect handles 302/301
-      const result = await (window as any).electronAPI.resolveRedirect(finalUrl);
+      // In main process resolveRedirect handles 302/301 and returns the FINAL URL as a string
+      const resolvedUrl = await (window as any).electronAPI.resolveRedirect(finalUrl);
       
-      // If we got a redirect result
-      if (result && result.nextUrl) {
-          console.log('Redirected to:', result.nextUrl);
-          // Recursively resolve if needed? Or just take the first hop?
-          // main.js already handles loop, so result.nextUrl is likely the destination or next hop.
-          // But main.js implementation of resolve-redirect is a bit complex.
-          // Let's trust main.js returns the final destination or the input if no redirect.
-          return result.nextUrl;
+      console.log('Resolved URL:', resolvedUrl);
+
+      if (typeof resolvedUrl === 'string' && resolvedUrl !== finalUrl) {
+          // If the resolved URL is different, it means we followed a redirect.
+          // We need to extract the origin (base URL) from it.
+          try {
+            const nextUrlObj = new URL(resolvedUrl);
+            return nextUrlObj.origin; // e.g. http://192.168.1.5:3000
+          } catch (e) {
+            return resolvedUrl;
+          }
       }
       
-      // If result.finalUrl is returned (no redirect)
-      if (result && result.finalUrl) {
-          return result.finalUrl;
-      }
-      
-      return finalUrl;
+      return resolvedUrl || finalUrl;
     } catch (err) {
       console.warn('URL resolution failed, using original', err);
       return finalUrl;
@@ -102,7 +101,7 @@ const LoginPage: React.FC = () => {
         <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-8 space-y-8 border border-slate-200 dark:border-slate-800">
           <div className="text-center">
             <div className="inline-flex items-center justify-center w-20 h-20 mb-6">
-              <img src="./logo.png" alt="Logo" className="w-full h-full object-contain" />
+              <img src={logoImg} alt="Logo" className="w-full h-full object-contain" />
             </div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Ting Reader</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">您的私有有声书馆</p>
