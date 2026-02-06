@@ -144,15 +144,28 @@ app.whenReady().then(() => {
       
       // Check if exists
       if (await fs.pathExists(cacheFilePath)) {
-        console.log('Serving from cache:', cacheFilePath);
-        // Serve file
-        // Electron protocol.handle expects a Response or Promise<Response>
-        // We can return a file stream.
-        // Using net.fetch(file://) equivalent?
-        // Node's fs.createReadStream is not a Web Stream.
-        // We can use `return net.fetch('file://' + cacheFilePath)` if we convert path to URL.
-        const fileUrl = 'file:///' + cacheFilePath.replace(/\\/g, '/');
-        return net.fetch(fileUrl);
+        const stats = await fs.stat(cacheFilePath);
+        // Basic integrity check: if size is 0, delete it
+        if (stats.size === 0) {
+            console.log('Cache file empty, deleting:', cacheFilePath);
+            await fs.unlink(cacheFilePath);
+        } else {
+            console.log('Serving from cache:', cacheFilePath);
+            const fileUrl = 'file:///' + cacheFilePath.replace(/\\/g, '/');
+            
+            // Handle range requests if present in original request
+            const rangeHeader = request.headers.get('Range');
+            if (rangeHeader) {
+                // net.fetch(file://) usually handles range if we pass the header?
+                // But for file:// protocol, Electron/Chromium might handle it automatically if we just return the file URL fetch.
+                // However, let's ensure we pass headers.
+                return net.fetch(fileUrl, {
+                    headers: { 'Range': rangeHeader }
+                });
+            }
+            
+            return net.fetch(fileUrl);
+        }
       }
 
       // Not in cache, fetch from remote
@@ -164,6 +177,11 @@ app.whenReady().then(() => {
       // Using global fetch (if available in main process Node 18+) or net.fetch (Electron)
       
       try {
+        // Handle 302 redirects manually for the audio stream if needed?
+        // net.fetch should follow redirects by default.
+        // But if remoteUrl is a 302 to a signed URL (e.g. S3), it should work.
+        
+        // Use session to share cookies if needed (though we use token)
         const response = await net.fetch(remoteUrl, {
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -171,6 +189,7 @@ app.whenReady().then(() => {
         });
 
         if (!response.ok) {
+            console.error(`Stream fetch failed: ${response.status} ${response.statusText}`);
             return response;
         }
 
@@ -179,12 +198,20 @@ app.whenReady().then(() => {
         const [stream1, stream2] = response.body.tee();
         
         // Stream 2 goes to file
-        // Convert Web Stream to Node Stream for fs.createWriteStream
-        // Or read the stream and write.
-        // Using a utility function to save stream to file asynchronously
-        saveStreamToFile(stream2, cacheFilePath).catch(err => console.error('Cache write failed:', err));
+        // IMPORTANT: We must handle errors during writing to avoid partial corrupt files being marked as valid.
+        // If writing fails or is incomplete, we should delete the file.
+        saveStreamToFile(stream2, cacheFilePath).catch(async err => {
+            console.error('Cache write failed:', err);
+            // Try to delete partial file
+            try { await fs.unlink(cacheFilePath); } catch (e) {}
+        });
 
         // Stream 1 goes to frontend
+        // We need to support Range requests for seeking?
+        // If we are streaming from net.fetch, it might not support range requests easily unless we proxy them.
+        // However, standard HTML5 audio usually handles non-range streams by buffering.
+        // But seeking might be limited until fully downloaded.
+        // For 'ting://' protocol, Electron might handle it.
         return new Response(stream1, {
             headers: response.headers,
             status: response.status,
@@ -210,15 +237,25 @@ app.whenReady().then(() => {
 // Helper to save Web ReadableStream to file
 async function saveStreamToFile(stream, filePath) {
     const reader = stream.getReader();
-    const fileStream = fs.createWriteStream(filePath);
+    // Use a temporary file first
+    const tempPath = filePath + '.tmp';
+    const fileStream = fs.createWriteStream(tempPath);
     try {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             fileStream.write(value);
         }
-    } finally {
         fileStream.end();
+        
+        // Only rename to final path if successful
+        await fs.move(tempPath, filePath, { overwrite: true });
+    } catch (err) {
+        // Cleanup temp file
+        fileStream.destroy();
+        try { await fs.unlink(tempPath); } catch (e) {}
+        throw err;
+    } finally {
         reader.releaseLock();
     }
 }
