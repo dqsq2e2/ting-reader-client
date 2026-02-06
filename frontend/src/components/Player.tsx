@@ -35,7 +35,17 @@ const Player: React.FC = () => {
   const getStreamUrl = (chapterId: string) => {
     if ((window as any).electronAPI) {
       // Electron mode: use custom protocol for caching
+      // Fix 302 redirect issue: If API_BASE_URL is a 302 redirect URL (e.g. DDNS),
+      // we must use the RESOLVED base URL, otherwise the 'ting://' protocol handler
+      // in main process might get confused or the 'remote' param will be the redirector
+      // and main process might not follow it correctly inside protocol handler fetch.
+      // Ideally, 'activeUrl' in authStore SHOULD be the resolved final URL.
+      // But just in case, we encode it.
       const remote = encodeURIComponent(API_BASE_URL);
+      // Append a random timestamp to prevent aggressive browser-side caching of the media element
+      // when the file is partial or corrupted? No, 'ting://' handles caching.
+      // But if the file is updated/redownloaded, we might need a cache buster?
+      // Usually not needed for static chapters.
       return `ting://stream/${chapterId}?token=${token}&remote=${remote}`;
     }
     return `${API_BASE_URL}/api/stream/${chapterId}?token=${token}`;

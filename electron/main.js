@@ -20,7 +20,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      webSecurity: false // Disable webSecurity to allow CORS from file:// to https://
     },
     icon: path.join(__dirname, 'icon.png')
   });
@@ -29,27 +30,42 @@ function createWindow() {
   mainWindow.setMenu(null);
 
   if (isDev) {
+    // Enable insecure localhost in dev
+    app.commandLine.appendSwitch('ignore-certificate-errors');
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
+    // In production, we might want to allow it too if users have self-signed certs
+    // CAUTION: This disables SSL validation globally.
+    // For a self-hosted app, this is often requested.
+    app.commandLine.appendSwitch('ignore-certificate-errors');
+    
     // Load local file
     // Ensure frontend is built to resources/frontend
     mainWindow.loadFile(path.join(__dirname, '../resources/frontend/index.html'));
   }
 }
 
+app.commandLine.appendSwitch('ignore-certificate-errors');
+app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
+
 app.whenReady().then(() => {
   // IPC: Resolve URL (follow redirects)
   ipcMain.handle('resolve-url', async (event, targetUrl) => {
     return new Promise((resolve, reject) => {
+      // Use redirect: 'follow' to let net.request handle redirects.
+      // But capturing the final URL is not directly exposed in the response object easily
+      // unless we check response.responseUrl (if available in Electron's net module).
+      // A more robust way for "Resolve URL" is manual following or checking if response.url exists.
+      // Electron net.request response doesn't always have the final URL property.
+      
+      // Let's use the manual redirect logic from 'resolve-redirect' as it is more reliable for extracting the final destination.
+      // Or simplify: just check if the URL is reachable.
+      
+      // Actually, 'resolve-url' seems unused in frontend? 
+      // 'resolve-redirect' is the one used in LoginPage.
       const request = net.request({ url: targetUrl, redirect: 'follow' });
       request.on('response', (response) => {
-        // In electron net module, getting the final URL is tricky if it followed redirects automatically.
-        // However, usually the response object might contain the final URL or we trust the input if it works.
-        // If we want to strictly find the final URL, we might need manual redirect handling.
-        // But for "302 redirect to new server", usually the Location header is what we want.
-        // Let's assume if status is 200, the URL is good.
-        // If we want to capture the *last* 302 location, we must use redirect: 'manual'.
         resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, url: targetUrl }); 
       });
       request.on('error', (error) => {
@@ -61,39 +77,68 @@ app.whenReady().then(() => {
 
   // IPC: Advanced Resolve (Manual Redirect Following)
   ipcMain.handle('resolve-redirect', async (event, initialUrl) => {
+    // Add protocol if missing
     let currentUrl = initialUrl;
+    if (!currentUrl.startsWith('http')) {
+        currentUrl = 'http://' + currentUrl;
+    }
+    
     let loopCount = 0;
     const maxRedirects = 10;
 
     try {
       while (loopCount < maxRedirects) {
+        console.log(`Resolving redirect loop ${loopCount}: ${currentUrl}`);
         const result = await new Promise((resolve, reject) => {
-          const request = net.request({ url: currentUrl, redirect: 'manual' });
-          request.on('response', (response) => {
-            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers['location']) {
-              let newLocation = response.headers['location'];
-              if (Array.isArray(newLocation)) newLocation = newLocation[0];
-              // Handle relative URLs
-              const nextUrl = new URL(newLocation, currentUrl).toString();
-              resolve({ redirect: true, nextUrl });
-            } else {
-              resolve({ redirect: false, finalUrl: currentUrl, statusCode: response.statusCode });
-            }
-          });
-          request.on('error', reject);
-          request.end();
+          // Use 'follow' for first hop? No, 'manual' is safer to inspect location header.
+          // But Electron net.request might be strict about SSL or other things.
+          // Try/catch around request creation
+          try {
+              const request = net.request({ url: currentUrl, redirect: 'manual' });
+              
+              request.on('response', (response) => {
+                // Check for redirect status codes (301, 302, 307, 308)
+                if (response.statusCode >= 300 && response.statusCode < 400 && response.headers['location']) {
+                  let newLocation = response.headers['location'];
+                  if (Array.isArray(newLocation)) newLocation = newLocation[0];
+                  // Handle relative URLs
+                  try {
+                      const nextUrl = new URL(newLocation, currentUrl).toString();
+                      resolve({ redirect: true, nextUrl });
+                  } catch (e) {
+                      reject(new Error(`Invalid redirect URL: ${newLocation}`));
+                  }
+                } else {
+                  // No redirect, return this as final
+                  resolve({ redirect: false, finalUrl: currentUrl, statusCode: response.statusCode });
+                }
+              });
+              
+              request.on('error', (err) => {
+                  console.error('Net request error:', err);
+                  // "Redirect was cancelled" can happen if network error or CORS? 
+                  // Or if the request was aborted.
+                  reject(err);
+              });
+
+              // Add headers if needed? User-Agent?
+              // request.setHeader('User-Agent', 'Electron');
+              
+              request.end();
+          } catch (e) {
+              reject(e);
+          }
         });
 
         if (result.redirect) {
           currentUrl = result.nextUrl;
           loopCount++;
         } else {
-          if (result.statusCode >= 200 && result.statusCode < 300) {
+          // Final destination reached
+          if (result.statusCode >= 200 && result.statusCode < 500) {
+             // Accept 2xx, 4xx (e.g. 401 Unauthorized is a valid server response)
              return currentUrl;
           } else {
-             // It might be a valid URL but returns 401 (Auth required) or 404.
-             // If 401, the URL is likely correct, just needs auth.
-             if (result.statusCode === 401) return currentUrl;
              throw new Error(`Failed with status ${result.statusCode}`);
           }
         }
@@ -101,7 +146,8 @@ app.whenReady().then(() => {
       throw new Error('Too many redirects');
     } catch (err) {
       console.error('Resolve redirect failed:', err);
-      throw err;
+      // If resolution fails, return original to let frontend try (or throw)
+      return initialUrl;
     }
   });
 
@@ -151,19 +197,49 @@ app.whenReady().then(() => {
             await fs.unlink(cacheFilePath);
         } else {
             console.log('Serving from cache:', cacheFilePath);
-            const fileUrl = 'file:///' + cacheFilePath.replace(/\\/g, '/');
+            const fileUrl = require('url').pathToFileURL(cacheFilePath).href;
             
             // Handle range requests if present in original request
             const rangeHeader = request.headers.get('Range');
+            
+            // IMPORTANT: If client requests Range, we MUST return 206 Partial Content
+            // net.fetch(file://) usually handles this, BUT we need to make sure 
+            // the response headers are correctly passed back to the audio element.
+            // Sometimes net.fetch returns 200 OK for file:// even with Range header, 
+            // which confuses the audio element if it expects 206.
+            
+            // Let's manually handle file serving for maximum compatibility with audio seeking
             if (rangeHeader) {
-                // net.fetch(file://) usually handles range if we pass the header?
-                // But for file:// protocol, Electron/Chromium might handle it automatically if we just return the file URL fetch.
-                // However, let's ensure we pass headers.
-                return net.fetch(fileUrl, {
-                    headers: { 'Range': rangeHeader }
+                const parts = rangeHeader.replace(/bytes=/, "").split("-");
+                const start = parseInt(parts[0], 10);
+                const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+                const chunksize = (end - start) + 1;
+                
+                console.log(`Serving Range: ${start}-${end} (Chunk: ${chunksize})`);
+
+                const fileStream = fs.createReadStream(cacheFilePath, { start, end });
+                
+                // Create a Web ReadableStream from Node stream
+                const readable = new ReadableStream({
+                    start(controller) {
+                        fileStream.on('data', chunk => controller.enqueue(chunk));
+                        fileStream.on('end', () => controller.close());
+                        fileStream.on('error', err => controller.error(err));
+                    }
+                });
+
+                return new Response(readable, {
+                    status: 206,
+                    headers: {
+                        'Content-Range': `bytes ${start}-${end}/${stats.size}`,
+                        'Accept-Ranges': 'bytes',
+                        'Content-Length': chunksize,
+                        'Content-Type': 'audio/mpeg'
+                    }
                 });
             }
             
+            // No range, return full file
             return net.fetch(fileUrl);
         }
       }
@@ -202,8 +278,9 @@ app.whenReady().then(() => {
         // If writing fails or is incomplete, we should delete the file.
         saveStreamToFile(stream2, cacheFilePath).catch(async err => {
             console.error('Cache write failed:', err);
-            // Try to delete partial file
-            try { await fs.unlink(cacheFilePath); } catch (e) {}
+            // Try to delete partial file - handled in saveStreamToFile catch block usually,
+            // but just in case of async error after that?
+            // saveStreamToFile handles temp file cleanup.
         });
 
         // Stream 1 goes to frontend

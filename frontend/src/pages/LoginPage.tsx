@@ -58,6 +58,8 @@ const LoginPage: React.FC = () => {
       return resolvedUrl || finalUrl;
     } catch (err) {
       console.warn('URL resolution failed, using original', err);
+      // In case of error (e.g. timeout), if we have a resolvedUrl (even if partial?), use it?
+      // No, fallback to input.
       return finalUrl;
     } finally {
       setResolving(false);
@@ -77,14 +79,87 @@ const LoginPage: React.FC = () => {
           setLoading(false);
           return;
         }
-        const activeUrl = await resolveServerUrl(serverAddress);
-        setServerUrl(serverAddress); // Always store the original input (Source of Truth)
-        setActiveUrl(activeUrl);     // Store the resolved URL (Cache)
+        
+        // Ensure we set the serverUrl in store
+        setServerUrl(serverAddress); 
+        // We will assume serverAddress is the base URL for now since we removed resolveRedirect logic.
+        // If serverAddress redirects, fetch will follow it automatically.
+        // We should store the EFFECTIVE url if possible, but fetch doesn't easily expose the final URL of a redirect
+        // unless we inspect response.url.
+        setActiveUrl(serverAddress);
       }
 
       // 2. Login
-      const response = await apiClient.post('/api/auth/login', { username, password });
-      const { token, user } = response.data;
+      // Use fetch instead of axios to bypass some CORS issues or handle it differently?
+      // Actually, if we disabled webSecurity in Electron main process, both should work.
+      // But fetch API is natively supported and might be simpler to debug.
+      
+      const loginUrl = `${isElectron ? serverAddress : ''}/api/auth/login`;
+      
+      // Attempt to probe the URL first to see if it redirects?
+      // Or just fire POST and handle retry.
+      
+      let fetchResponse = await fetch(loginUrl, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ username, password })
+      });
+      
+      // If we followed a redirect (in either attempt), update activeUrl
+      if (isElectron && fetchResponse.redirected) {
+          try {
+              console.log('Final effective URL:', fetchResponse.url);
+              const baseUrl = fetchResponse.url.replace(/\/api\/auth\/login\/?$/, '');
+              setActiveUrl(baseUrl);
+          } catch(e) {
+              console.error('Failed to parse final URL', e);
+          }
+      }
+
+      if (!fetchResponse.ok) {
+          const errorData = await fetchResponse.json().catch(() => ({}));
+          // If we got a 404 and it was a redirect, it means the POST became GET.
+          // This is a common issue with 302 redirects.
+          // We need to retry the POST request to the NEW location if we detected a redirect but got 404/Method Not Allowed.
+          // OR, we can try to pre-resolve the redirect with a HEAD/GET request first.
+          
+          if (fetchResponse.status === 404 && fetchResponse.redirected) {
+               // The redirect happened, but browser changed POST to GET.
+               // Let's retry POST to the new URL.
+               console.log('Redirect turned POST into GET (404). Retrying POST to new URL:', fetchResponse.url);
+               const retryResponse = await fetch(fetchResponse.url, {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ username, password })
+               });
+               
+               if (retryResponse.ok) {
+                   const data = await retryResponse.json();
+                   const { token, user } = data;
+                   
+                   // Update base URL based on successful retry
+                   const baseUrl = retryResponse.url.replace(/\/api\/auth\/login\/?$/, '');
+                   setActiveUrl(baseUrl);
+                   
+                   setAuth(user, token);
+                   navigate('/');
+                   return;
+               } else {
+                   // Retry failed too
+                   const retryError = await retryResponse.json().catch(() => ({}));
+                   throw { response: { data: retryError } };
+               }
+          }
+          
+          throw { response: { data: errorData } }; // Mimic axios error structure for catch block
+      }
+      
+      const data = await fetchResponse.json();
+      const { token, user } = data;
       setAuth(user, token);
       navigate('/');
     } catch (err: any) {
