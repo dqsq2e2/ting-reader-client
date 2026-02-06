@@ -86,18 +86,17 @@ jobs:
 
       # 4. Update Git Tag
       - name: Update Git Tag
-        if: steps.check_release.outputs.exists != 'true'
         shell: bash
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          # Force update the tag to point to the current commit
           git tag -f v${{ env.VERSION }}
           git push origin v${{ env.VERSION }} --force
 
       # 6. Extract Release Notes
       - name: Extract Release Notes
         id: extract_notes
-        if: steps.check_release.outputs.exists != 'true'
         shell: bash
         working-directory: .
         run: |
@@ -113,8 +112,7 @@ jobs:
 
       # 7. Create Release
       - name: Create Release
-        if: steps.check_release.outputs.exists != 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           name: Release v${{ env.VERSION }}
