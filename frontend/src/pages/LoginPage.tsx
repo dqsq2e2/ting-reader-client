@@ -28,17 +28,34 @@ const LoginPage: React.FC = () => {
     // Only for Electron
     if (!isElectron) return url;
 
-    let finalUrl = url.replace(/\/$/, ''); // Remove trailing slash
+    // Remove file:// protocol if accidentally pasted
+    let finalUrl = url.replace(/^file:\/\//, '').replace(/\/$/, '');
+    
+    // Add http protocol if missing
     if (!finalUrl.startsWith('http')) {
       finalUrl = `http://${finalUrl}`;
     }
 
     try {
       setResolving(true);
+      // In main process resolveRedirect handles 302/301
       const result = await (window as any).electronAPI.resolveRedirect(finalUrl);
-      if (result && (result.finalUrl || result.statusCode === 401)) {
-          return result.finalUrl || finalUrl;
+      
+      // If we got a redirect result
+      if (result && result.nextUrl) {
+          console.log('Redirected to:', result.nextUrl);
+          // Recursively resolve if needed? Or just take the first hop?
+          // main.js already handles loop, so result.nextUrl is likely the destination or next hop.
+          // But main.js implementation of resolve-redirect is a bit complex.
+          // Let's trust main.js returns the final destination or the input if no redirect.
+          return result.nextUrl;
       }
+      
+      // If result.finalUrl is returned (no redirect)
+      if (result && result.finalUrl) {
+          return result.finalUrl;
+      }
+      
       return finalUrl;
     } catch (err) {
       console.warn('URL resolution failed, using original', err);
@@ -85,7 +102,7 @@ const LoginPage: React.FC = () => {
         <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-8 space-y-8 border border-slate-200 dark:border-slate-800">
           <div className="text-center">
             <div className="inline-flex items-center justify-center w-20 h-20 mb-6">
-              <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
+              <img src="./logo.png" alt="Logo" className="w-full h-full object-contain" />
             </div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Ting Reader</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">您的私有有声书馆</p>
@@ -105,7 +122,6 @@ const LoginPage: React.FC = () => {
                     onChange={(e) => setServerAddress(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-all dark:text-white"
                     placeholder="例如: http://192.168.1.10:3000"
-                    required={isElectron}
                   />
                 </div>
                 <p className="text-[10px] text-slate-400 px-1">
