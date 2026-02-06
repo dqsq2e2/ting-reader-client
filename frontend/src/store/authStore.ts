@@ -20,11 +20,14 @@ interface AuthState {
   logout: () => void;
 }
 
+const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI;
+const defaultServerUrl = isElectron ? '' : (import.meta.env.PROD ? window.location.origin : 'http://localhost:3000');
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: JSON.parse(localStorage.getItem('user') || 'null'),
   token: localStorage.getItem('auth_token'),
-  serverUrl: localStorage.getItem('server_url') || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3000'),
-  activeUrl: localStorage.getItem('active_url') || localStorage.getItem('server_url') || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3000'),
+  serverUrl: localStorage.getItem('server_url') || defaultServerUrl,
+  activeUrl: localStorage.getItem('active_url') || localStorage.getItem('server_url') || defaultServerUrl,
   isAuthenticated: !!localStorage.getItem('auth_token'),
   setAuth: (user, token) => {
     localStorage.setItem('auth_token', token);

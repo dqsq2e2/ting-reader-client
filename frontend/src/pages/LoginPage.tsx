@@ -21,50 +21,14 @@ const LoginPage: React.FC = () => {
 
   useEffect(() => {
     if (storedServerUrl && isElectron) {
-      setServerAddress(storedServerUrl);
+      // Fix: If stored URL is file:// (legacy default), clear it
+      if (storedServerUrl.startsWith('file://')) {
+        setServerAddress('');
+      } else {
+        setServerAddress(storedServerUrl);
+      }
     }
   }, [storedServerUrl, isElectron]);
-
-  const resolveServerUrl = async (url: string) => {
-    // Only for Electron
-    if (!isElectron) return url;
-
-    // Remove file:// protocol if accidentally pasted
-    let finalUrl = url.replace(/^file:\/\//, '').replace(/\/$/, '');
-    
-    // Add http protocol if missing
-    if (!finalUrl.startsWith('http')) {
-      finalUrl = `http://${finalUrl}`;
-    }
-
-    try {
-      setResolving(true);
-      // In main process resolveRedirect handles 302/301 and returns the FINAL URL as a string
-      const resolvedUrl = await (window as any).electronAPI.resolveRedirect(finalUrl);
-      
-      console.log('Resolved URL:', resolvedUrl);
-
-      if (typeof resolvedUrl === 'string' && resolvedUrl !== finalUrl) {
-          // If the resolved URL is different, it means we followed a redirect.
-          // We need to extract the origin (base URL) from it.
-          try {
-            const nextUrlObj = new URL(resolvedUrl);
-            return nextUrlObj.origin; // e.g. http://192.168.1.5:3000
-          } catch (e) {
-            return resolvedUrl;
-          }
-      }
-      
-      return resolvedUrl || finalUrl;
-    } catch (err) {
-      console.warn('URL resolution failed, using original', err);
-      // In case of error (e.g. timeout), if we have a resolvedUrl (even if partial?), use it?
-      // No, fallback to input.
-      return finalUrl;
-    } finally {
-      setResolving(false);
-    }
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
