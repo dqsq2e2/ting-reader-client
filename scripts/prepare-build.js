@@ -14,8 +14,14 @@ async function main() {
     await fs.ensureDir(resourcesDir);
 
     // 2. Build Frontend
-    console.log('Building frontend...');
-    execSync('npm run build', { cwd: path.join(readerDir, 'frontend'), stdio: 'inherit' });
+    // Check if dist already exists (e.g. built by CI workflow) to avoid double build
+    const frontendDist = path.join(readerDir, 'frontend/dist');
+    if (await fs.pathExists(frontendDist)) {
+        console.log('Frontend dist found, skipping build step...');
+    } else {
+        console.log('Building frontend...');
+        execSync('npm run build', { cwd: path.join(readerDir, 'frontend'), stdio: 'inherit' });
+    }
 
     // 3. Copy Frontend Dist
     console.log('Copying frontend dist...');
