@@ -22,11 +22,16 @@ jobs:
         with:
           node-version: 20
 
+      # ------------------------------------------------------------------
+      # NOTE: This workflow assumes the repository root IS 'ting-reader-client'
+      # so we run commands in the root (.) or ./frontend
+      # ------------------------------------------------------------------
+
       - name: Get version from package.json
         id: get_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./ting-reader-client/package.json').version")
+          VERSION=$(node -p "require('./package.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -44,26 +49,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ------------------------------------------------------------------
-      # NOTE: This workflow assumes the repository root is 'ting-reader-client'
-      # ------------------------------------------------------------------
-
       # 1. Install & Build Frontend
       - name: Install Frontend Dependencies
         if: steps.check_release.outputs.exists != 'true'
-        working-directory: ./ting-reader-client/frontend
+        working-directory: ./frontend
         run: npm install
 
       - name: Build Frontend
         if: steps.check_release.outputs.exists != 'true'
-        working-directory: ./ting-reader-client/frontend
+        working-directory: ./frontend
         run: npm run build
 
       # 2. Install Desktop Dependencies
       # This includes electron-builder and scripts dependencies
       - name: Install Desktop Dependencies
         if: steps.check_release.outputs.exists != 'true'
-        working-directory: ./ting-reader-client
+        working-directory: .
         run: npm install
 
       # 3. Build Desktop App (Win x64)
@@ -71,7 +72,7 @@ jobs:
       # built frontend and backend code to 'resources/', then runs electron-builder.
       - name: Build Desktop App
         if: steps.check_release.outputs.exists != 'true'
-        working-directory: ./ting-reader-client
+        working-directory: .
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run electron:build
@@ -91,7 +92,7 @@ jobs:
         id: extract_notes
         if: steps.check_release.outputs.exists != 'true'
         shell: bash
-        working-directory: ./ting-reader-client
+        working-directory: .
         run: |
           VERSION="${{ env.VERSION }}"
           START_LINE=$(grep -n "## \[$VERSION\]" CHANGELOG.md | cut -d: -f1)
@@ -110,11 +111,11 @@ jobs:
         with:
           tag_name: v${{ env.VERSION }}
           name: Release v${{ env.VERSION }}
-          body_path: ting-reader-client/RELEASE_NOTES.md
+          body_path: RELEASE_NOTES.md
           draft: false
           prerelease: false
           files: |
-            ting-reader-client/dist_electron/*.exe
-            ting-reader-client/dist_electron/latest.yml
+            dist_electron/*.exe
+            dist_electron/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
