@@ -20,8 +20,7 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
-      contextIsolation: true,
-      webSecurity: false // Temporary fix for CORS/Protocol issues if needed
+      contextIsolation: true
     },
     icon: path.join(__dirname, 'icon.png')
   });
