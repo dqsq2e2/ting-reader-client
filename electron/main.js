@@ -35,7 +35,7 @@ function createWindow() {
   } else {
     // Load local file
     // Ensure frontend is built to resources/frontend
-    mainWindow.loadFile(path.join(process.resourcesPath, 'app/resources/frontend/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../resources/frontend/index.html'));
   }
 }
 
