@@ -23,7 +23,7 @@ function createWindow() {
       contextIsolation: true,
       webSecurity: false // Temporary fix for CORS/Protocol issues if needed
     },
-    icon: path.join(__dirname, '../build/icon.png')
+    icon: path.join(__dirname, 'icon.png')
   });
 
   // Hide the default menu
