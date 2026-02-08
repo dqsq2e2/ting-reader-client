@@ -56,18 +56,17 @@ apiClient.interceptors.response.use(
         
         try {
            // Call Electron IPC to resolve again
-           const result = await (window as any).electronAPI.resolveRedirect(serverUrl);
-           const newActiveUrl = (result && result.finalUrl) ? result.finalUrl : serverUrl;
+           const newUrl = await (window as any).electronAPI.resolveRedirect(serverUrl);
            
-           if (newActiveUrl) {
-             console.log('Resolved new active URL:', newActiveUrl);
-             setActiveUrl(newActiveUrl);
+           // In main.js, resolve-redirect returns the URL string directly
+           if (newUrl && typeof newUrl === 'string') {
+             console.log('Resolved new active URL:', newUrl);
+             
+             // Update store
+             setActiveUrl(newUrl);
              
              // Update request baseURL and retry
-             originalRequest.baseURL = newActiveUrl;
-             // Ensure the url is relative to the new baseURL if it was absolute
-             // Actually axios merges baseURL + url. If url is absolute, baseURL is ignored.
-             // We need to be careful. Usually 'url' in config is relative (e.g. /api/auth/login).
+             originalRequest.baseURL = newUrl;
              
              return apiClient(originalRequest);
            }
