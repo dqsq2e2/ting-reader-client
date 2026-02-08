@@ -9,9 +9,9 @@ const LoginPage: React.FC = () => {
   const [serverAddress, setServerAddress] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberPassword, setRememberPassword] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [resolving, setResolving] = useState(false);
   
   const navigate = useNavigate();
   const { setAuth, setServerUrl, setActiveUrl, serverUrl: storedServerUrl } = useAuthStore();
@@ -20,6 +20,12 @@ const LoginPage: React.FC = () => {
   const isElectron = !!(window as any).electronAPI;
 
   useEffect(() => {
+    // Restore saved credentials if available
+    const savedUsername = localStorage.getItem('saved_username');
+    const savedPassword = localStorage.getItem('saved_password');
+    if (savedUsername) setUsername(savedUsername);
+    if (savedPassword) setPassword(savedPassword);
+    
     if (storedServerUrl && isElectron) {
       // Fix: If stored URL is file:// (legacy default), clear it
       if (storedServerUrl.startsWith('file://')) {
@@ -124,6 +130,16 @@ const LoginPage: React.FC = () => {
       
       const data = await fetchResponse.json();
       const { token, user } = data;
+      
+      // Save credentials if "Remember Password" is checked
+      if (rememberPassword) {
+        localStorage.setItem('saved_username', username);
+        localStorage.setItem('saved_password', password);
+      } else {
+        localStorage.removeItem('saved_username');
+        localStorage.removeItem('saved_password');
+      }
+
       setAuth(user, token);
       navigate('/');
     } catch (err: any) {
@@ -200,6 +216,19 @@ const LoginPage: React.FC = () => {
                   required
                 />
               </div>
+            </div>
+
+            <div className="flex items-center">
+              <input
+                id="remember-password"
+                type="checkbox"
+                checked={rememberPassword}
+                onChange={(e) => setRememberPassword(e.target.checked)}
+                className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+              />
+              <label htmlFor="remember-password" className="ml-2 text-sm text-slate-600 dark:text-slate-400">
+                记住密码 (启动时自动登录)
+              </label>
             </div>
 
             {error && (

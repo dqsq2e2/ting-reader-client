@@ -1,6 +1,7 @@
 import React from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
+import AppInitializer from './components/AppInitializer';
 import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import BookshelfPage from './pages/BookshelfPage';
@@ -29,40 +30,42 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
 function App() {
   return (
     <Router>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/widget" element={<WidgetPage />} />
-        <Route path="/widget/:id" element={<WidgetPage />} />
-        
-        <Route path="/" element={
-          <ProtectedRoute>
-            <Layout />
-          </ProtectedRoute>
-        }>
-          <Route index element={<HomePage />} />
-          <Route path="bookshelf" element={<BookshelfPage />} />
-          <Route path="book/:id" element={<BookDetailPage />} />
-          <Route path="search" element={<SearchPage />} />
-          <Route path="favorites" element={<FavoritesPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+      <AppInitializer>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/widget" element={<WidgetPage />} />
+          <Route path="/widget/:id" element={<WidgetPage />} />
           
-          <Route path="admin/libraries" element={
-            <AdminRoute>
-              <AdminLibraries />
-            </AdminRoute>
-          } />
-          <Route path="admin/users" element={
-            <AdminRoute>
-              <AdminUsers />
-            </AdminRoute>
-          } />
-          <Route path="admin/tasks" element={
-            <AdminRoute>
-              <TaskLogsPage />
-            </AdminRoute>
-          } />
-        </Route>
-      </Routes>
+          <Route path="/" element={
+            <ProtectedRoute>
+              <Layout />
+            </ProtectedRoute>
+          }>
+            <Route index element={<HomePage />} />
+            <Route path="bookshelf" element={<BookshelfPage />} />
+            <Route path="book/:id" element={<BookDetailPage />} />
+            <Route path="search" element={<SearchPage />} />
+            <Route path="favorites" element={<FavoritesPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            
+            <Route path="admin/libraries" element={
+              <AdminRoute>
+                <AdminLibraries />
+              </AdminRoute>
+            } />
+            <Route path="admin/users" element={
+              <AdminRoute>
+                <AdminUsers />
+              </AdminRoute>
+            } />
+            <Route path="admin/tasks" element={
+              <AdminRoute>
+                <TaskLogsPage />
+              </AdminRoute>
+            } />
+          </Route>
+        </Routes>
+      </AppInitializer>
     </Router>
   );
 }
