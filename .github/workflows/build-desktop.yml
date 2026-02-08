@@ -5,16 +5,24 @@ on:
     branches:
       - main
       - master
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
     tags:
       - 'v*'
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
 
     permissions:
       contents: write
+      
 
     steps:
       - name: Checkout Code
@@ -37,22 +45,6 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Check if release exists
-        id: check_release
-        shell: bash
-        run: |
-          if gh release view "v${{ env.VERSION }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Release v${{ env.VERSION }} already exists. Skipping release steps."
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Release v${{ env.VERSION }} does not exist. Proceeding with build and release."
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # 1. Install & Build Frontend
       - name: Install Frontend Dependencies
         working-directory: ./frontend
         run: npm install
@@ -61,56 +53,96 @@ jobs:
         working-directory: ./frontend
         run: npm run build
 
-      # 2. Install Desktop Dependencies
-      # This includes electron-builder and scripts dependencies
       - name: Install Desktop Dependencies
         working-directory: .
         run: npm install
 
-      # 3. Build Desktop App (Win x64)
-      # This script runs 'scripts/prepare-build.js' which copies
-      # built frontend and backend code to 'resources/', then runs electron-builder.
+      # Linux specific setup for electron-builder (snapcraft, etc if needed)
+      # Usually 'npm run electron:build' handles appimage/deb/rpm/snap if configured.
+      # For now, we assume default targets.
+
       - name: Build Desktop App
         working-directory: .
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run electron:build
+        run: npm run electron:build -- --publish never
+        # 'publish: never' because we upload manually later or rely on softprops/action-gh-release
+        
+      # Upload Artifacts
 
-      # 3.5 Upload Artifacts (Always upload for testing)
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TingReader-Client-v${{ env.VERSION }}
-          path: dist_electron/*.exe
+          name: TingReader-Client-${{ matrix.os }}-v${{ env.VERSION }}
+          path: |
+            dist_electron/*.exe
+            dist_electron/*.dmg
+            dist_electron/*.zip
+            dist_electron/*.AppImage
+            dist_electron/*.deb
+            dist_electron/*.rpm
+
           retention-days: 5
 
-      # 4. Update Git Tag
-      - name: Update Git Tag
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Get version from package.json
+        id: get_version
         shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      # Create Tag
+
+      - name: Update Git Tag
+
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          # Force update the tag to point to the current commit
+
           git tag -f v${{ env.VERSION }}
           git push origin v${{ env.VERSION }} --force
 
-      # 6. Extract Release Notes
+      # Extract Release Notes
+
       - name: Extract Release Notes
         id: extract_notes
         shell: bash
-        working-directory: .
+
         run: |
           VERSION="${{ env.VERSION }}"
-          START_LINE=$(grep -n "## \[$VERSION\]" CHANGELOG.md | cut -d: -f1)
-          if [ -n "$START_LINE" ]; then
-            # Extract including the version header line
-            tail -n +$START_LINE CHANGELOG.md | sed -n '1p; 2,${/## \[/q; p}' > RELEASE_NOTES.md
+          if [ -f CHANGELOG.md ]; then
+            START_LINE=$(grep -n "## \[$VERSION\]" CHANGELOG.md | cut -d: -f1)
+            if [ -n "$START_LINE" ]; then
+              tail -n +$START_LINE CHANGELOG.md | sed -n '1p; 2,${/## \[/q; p}' > RELEASE_NOTES.md
+            else
+              echo "Version $VERSION not found in CHANGELOG.md"
+              echo "Release v$VERSION" > RELEASE_NOTES.md
+            fi
+
           else
-            echo "Version $VERSION not found in CHANGELOG.md"
-            echo "Full changelog available in CHANGELOG.md" > RELEASE_NOTES.md
+            echo "Release v$VERSION" > RELEASE_NOTES.md
+
           fi
 
-      # 7. Create Release
+      # Create Release
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -120,7 +152,15 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist_electron/*.exe
-            dist_electron/latest.yml
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.yml
+            artifacts/**/*.blockmap
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
