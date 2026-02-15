@@ -224,6 +224,8 @@ const BookDetailPage: React.FC = () => {
   }, [book?.tags]);
 
   useEffect(() => {
+    if (hasInitialScrolled.current) return;
+
     if (book && currentChapter && (currentChapter.book_id === book.id || currentChapter.bookId === book.id)) {
       // Determine if current chapter is in main or extra
       // Note: We need to find it in the lists.
@@ -231,15 +233,18 @@ const BookDetailPage: React.FC = () => {
       const inExtra = extraChapters.find(c => c.id === currentChapter.id);
       
       let targetList = currentChapters;
+      let targetTab = activeTab;
       
       if (inMain) {
         if (activeTab !== 'main') {
           setActiveTab('main');
+          targetTab = 'main';
         }
         targetList = mainChapters;
       } else if (inExtra) {
         if (activeTab !== 'extra') {
           setActiveTab('extra');
+          targetTab = 'extra';
         }
         targetList = extraChapters;
       }
@@ -257,6 +262,7 @@ const BookDetailPage: React.FC = () => {
           const el = document.getElementById(`chapter-${currentChapter.id}`);
           if (el) {
             el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            hasInitialScrolled.current = true;
           }
         }, 100);
       }
