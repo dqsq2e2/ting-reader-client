@@ -33,7 +33,7 @@ function createWindow() {
     // Enable insecure localhost in dev
     app.commandLine.appendSwitch('ignore-certificate-errors');
     mainWindow.loadURL('http://localhost:5173');
-    // mainWindow.webContents.openDevTools(); // Commented out to reduce console noise (Autofill/VE errors)
+    mainWindow.webContents.openDevTools();
   } else {
     // In production, we might want to allow it too if users have self-signed certs
     // CAUTION: This disables SSL validation globally.
@@ -355,8 +355,18 @@ app.whenReady().then(() => {
       console.log('Fetching remote:', remoteUrl);
       
       try {
+        const fetchHeaders = { 
+          'Authorization': `Bearer ${token}` 
+        };
+
+        // Pass Range header if present
+        const rangeHeader = request.headers.get('Range');
+        if (rangeHeader) {
+          fetchHeaders['Range'] = rangeHeader;
+        }
+
         const response = await net.fetch(remoteUrl, {
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: fetchHeaders
         });
 
         if (!response.ok) {
@@ -365,7 +375,9 @@ app.whenReady().then(() => {
         }
 
         // Clone response to split streams?
-        if (shouldCache) {
+        // Only cache if NO Range header was sent (i.e. full download)
+        // If Range header was sent, we are getting a partial content, so we cannot cache it as a full file.
+        if (shouldCache && !rangeHeader) {
             const [stream1, stream2] = response.body.tee();
             
             // Stream 2 goes to file
@@ -379,7 +391,7 @@ app.whenReady().then(() => {
                 statusText: response.statusText
             });
         } else {
-            // No caching, just pass through
+            // No caching (or partial content), just pass through
             return new Response(response.body, {
                 headers: response.headers,
                 status: response.status,
