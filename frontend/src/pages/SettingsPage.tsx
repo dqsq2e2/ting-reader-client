@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
 import { useTheme } from '../hooks/useTheme';
+import { usePlayerStore } from '../store/playerStore';
 import { 
   Settings as SettingsIcon, 
   Moon, 
@@ -14,19 +15,26 @@ import {
   Key,
   Code,
   ExternalLink,
-  Copy
+  Copy,
+  Download,
+  ChevronRight
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { usePlayerStore } from '../store/playerStore';
+import { useDownloadStore } from '../store/downloadStore';
 
 const SettingsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { user, setUser } = useAuthStore();
   const { applyTheme } = useTheme();
   const setPlaybackSpeed = usePlayerStore(state => state.setPlaybackSpeed);
+  const setClientAutoDownload = usePlayerStore(state => state.setClientAutoDownload);
   const [settings, setSettings] = useState({
     playback_speed: 1.0,
     sleep_timer_default: 0,
     auto_preload: false,
+    auto_cache: false,
+    client_auto_download: false,
     theme: 'system' as 'light' | 'dark' | 'system',
     widget_css: ''
   });
@@ -64,6 +72,8 @@ const SettingsPage: React.FC = () => {
     try {
       await (window as any).electronAPI.clearCache();
       updateCacheStats();
+      // Also clear download store status
+      useDownloadStore.getState().clearAllTasks();
       alert('缓存已清空');
     } catch (err) {
       alert('清空缓存失败');
@@ -75,7 +85,9 @@ const SettingsPage: React.FC = () => {
       const response = await apiClient.get('/api/settings');
       const fetchedSettings = {
         ...response.data,
-        auto_preload: !!response.data.auto_preload
+        auto_preload: !!response.data.auto_preload,
+        auto_cache: !!response.data.auto_cache,
+        client_auto_download: !!response.data.client_auto_download
       };
       setSettings(fetchedSettings);
       // Ensure local theme matches server theme
@@ -97,6 +109,11 @@ const SettingsPage: React.FC = () => {
       // Sync playback speed to player store immediately
       if (newSettings.playback_speed) {
         setPlaybackSpeed(newSettings.playback_speed);
+      }
+
+      // Sync client auto download to player store
+      if (newSettings.client_auto_download !== undefined) {
+        setClientAutoDownload(newSettings.client_auto_download);
       }
       
       // Apply theme immediately if it changed
@@ -258,6 +275,23 @@ const SettingsPage: React.FC = () => {
               <Zap size={20} className="text-yellow-500" />
               缓存管理
             </h2>
+            
+            <div 
+                onClick={() => navigate('/downloads')}
+                className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors mb-6"
+            >
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-primary-50 dark:bg-primary-900/20 rounded-xl flex items-center justify-center text-primary-600">
+                        <Download size={20} />
+                    </div>
+                    <div>
+                        <div className="font-bold text-slate-900 dark:text-white">下载管理</div>
+                        <div className="text-xs text-slate-500 font-medium">查看下载任务和已缓存内容</div>
+                    </div>
+                </div>
+                <ChevronRight size={18} className="text-slate-400" />
+            </div>
+
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-bold dark:text-white">本地音频缓存</p>
@@ -318,6 +352,46 @@ const SettingsPage: React.FC = () => {
                 }`} />
               </button>
             </div>
+
+            <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex-1 min-w-0">
+                <p className="font-bold dark:text-white truncate">服务端自动缓存 (WebDAV)</p>
+                <p className="text-xs md:text-sm text-slate-500 line-clamp-2">
+                  播放当前章节时，通知服务器预先缓存下一章节 (仅适用于 WebDAV 库)
+                </p>
+              </div>
+              <button
+                onClick={() => handleSave({ ...settings, auto_cache: !settings.auto_cache })}
+                className={`flex-shrink-0 w-12 md:w-14 h-7 md:h-8 rounded-full transition-all relative ${
+                  settings.auto_cache ? 'bg-primary-600' : 'bg-slate-200 dark:bg-slate-700'
+                }`}
+              >
+                <div className={`absolute top-1 w-5 md:w-6 h-5 md:h-6 bg-white rounded-full transition-all ${
+                  settings.auto_cache ? 'left-6 md:left-7' : 'left-1'
+                }`} />
+              </button>
+            </div>
+
+            {isElectron && (
+              <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold dark:text-white truncate">客户端自动下载 (离线播放)</p>
+                  <p className="text-xs md:text-sm text-slate-500 line-clamp-2">
+                    播放当前章节时，自动下载下一章节到本地设备
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleSave({ ...settings, client_auto_download: !settings.client_auto_download })}
+                  className={`flex-shrink-0 w-12 md:w-14 h-7 md:h-8 rounded-full transition-all relative ${
+                    settings.client_auto_download ? 'bg-primary-600' : 'bg-slate-200 dark:bg-slate-700'
+                  }`}
+                >
+                  <div className={`absolute top-1 w-5 md:w-6 h-5 md:h-6 bg-white rounded-full transition-all ${
+                    settings.client_auto_download ? 'left-6 md:left-7' : 'left-1'
+                  }`} />
+                </button>
+              </div>
+            )}
           </div>
         </section>
 

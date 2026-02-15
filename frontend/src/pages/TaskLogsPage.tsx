@@ -8,8 +8,11 @@ import {
   Clock, 
   Loader2,
   Database,
-  Search
+  Search,
+  Download,
+  Trash2
 } from 'lucide-react';
+import { useDownloadStore } from '../store/downloadStore';
 
 interface Task {
   id: string;
@@ -26,7 +29,6 @@ const TaskLogsPage: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
-
   useEffect(() => {
     fetchTasks();
     let interval: ReturnType<typeof setInterval>;
@@ -39,7 +41,8 @@ const TaskLogsPage: React.FC = () => {
   const fetchTasks = async () => {
     try {
       const response = await apiClient.get('/api/tasks');
-      setTasks(response.data);
+      // Filter out download tasks to avoid clutter
+      setTasks(response.data.filter((t: Task) => t.type !== 'download'));
     } catch (err) {
       console.error('Failed to fetch tasks', err);
     } finally {

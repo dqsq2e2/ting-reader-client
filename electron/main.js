@@ -33,7 +33,7 @@ function createWindow() {
     // Enable insecure localhost in dev
     app.commandLine.appendSwitch('ignore-certificate-errors');
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+    // mainWindow.webContents.openDevTools(); // Commented out to reduce console noise (Autofill/VE errors)
   } else {
     // In production, we might want to allow it too if users have self-signed certs
     // CAUTION: This disables SSL validation globally.
@@ -81,6 +81,13 @@ app.whenReady().then(() => {
     let currentUrl = initialUrl;
     if (!currentUrl.startsWith('http')) {
         currentUrl = 'http://' + currentUrl;
+    }
+    
+    // Fix: Handle malformed URLs like "http:// http://localhost:3000"
+    // This happens if client prepends http:// to an already full URL
+    // or if initialUrl is garbage.
+    if (currentUrl.match(/^http:\/\/\s*http/i) || currentUrl.match(/^https:\/\/\s*http/i)) {
+         currentUrl = currentUrl.replace(/^https?:\/\/\s*/i, '');
     }
     
     let loopCount = 0;
@@ -162,72 +169,159 @@ app.whenReady().then(() => {
     return stats.size;
   });
 
-  // Protocol: ting://stream/<chapterId>?token=...&remote=...
+  // IPC: Download Chapter
+  ipcMain.handle('download-chapter', async (event, { url, fileName, taskId }) => {
+    try {
+      await cacheManager.downloadToCache(url, fileName, (progress) => {
+        if (!event.sender.isDestroyed()) {
+             event.sender.send('download-progress', { taskId, progress });
+        }
+      });
+      return { success: true };
+    } catch (err) {
+      console.error('Download failed:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // IPC: Download Cover
+  ipcMain.handle('download-cover', async (event, { url, bookId, force }) => {
+    try {
+      // Simple filename strategy: cover_{bookId}
+      const fileName = `cover_${bookId}`;
+      
+      // Check if exists first to avoid re-downloading, unless forced
+      if (!force && await cacheManager.isCached(fileName)) {
+          return { success: true, cached: true };
+      }
+
+      await cacheManager.downloadToCache(url, fileName, null, true); // isCover = true
+      return { success: true };
+    } catch (err) {
+      console.error('Cover download failed:', err);
+      // Don't fail the whole task if cover fails
+      return { success: false, error: err.message };
+    }
+  });
+
+  // IPC: Check Cached
+  ipcMain.handle('check-cached', async (event, fileNames) => {
+    const results = {};
+    for (const name of fileNames) {
+      results[name] = await cacheManager.isCached(name);
+    }
+    return results;
+  });
+
+  // IPC: Remove Cached File
+  ipcMain.handle('remove-cached-file', async (event, fileName) => {
+    try {
+      const cacheDir = cacheManager.getCacheDir();
+      const filePath = path.join(cacheDir, fileName);
+      if (await fs.pathExists(filePath)) {
+        await fs.unlink(filePath);
+        return { success: true };
+      }
+      // Also check if it's a cover file (no extension potentially or with prefix)
+      // Actually 'fileName' passed here is usually just chapterId or full name?
+      // Frontend passes `task.chapterId + '.mp3'` usually.
+      
+      return { success: false, error: 'File not found' };
+    } catch (err) {
+      console.error('Remove cached file failed:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  // IPC: List Cached Files
+  ipcMain.handle('list-cached-files', async () => {
+    try {
+      const cacheDir = cacheManager.getCacheDir();
+      if (!await fs.pathExists(cacheDir)) return [];
+      
+      const files = await fs.readdir(cacheDir);
+      const fileDetails = await Promise.all(
+        files.filter(f => f.endsWith('.mp3')).map(async (name) => {
+          const filePath = path.join(cacheDir, name);
+          const stats = await fs.stat(filePath);
+          return { 
+            name, 
+            path: filePath, 
+            size: stats.size, 
+            mtime: stats.mtime 
+          };
+        })
+      );
+      // Sort by newest first
+      fileDetails.sort((a, b) => b.mtime - a.mtime);
+      return fileDetails;
+    } catch (err) {
+      console.error('List cached files failed:', err);
+      return [];
+    }
+  });
+
+  // Protocol: ting://stream/<chapterId> or ting://cover/<bookId>
   protocol.handle('ting', async (request) => {
     const url = new URL(request.url);
-    const action = url.hostname; // 'stream'
+    const action = url.hostname; // 'stream' or 'cover'
 
     if (action === 'stream') {
       const chapterId = url.pathname.replace(/^\//, ''); // /123 -> 123
       const token = url.searchParams.get('token');
       const remoteBase = url.searchParams.get('remote');
+      // Pass a flag 'cache=0' to skip caching
+      const shouldCache = url.searchParams.get('cache') !== '0'; 
       
       if (!remoteBase || !chapterId) {
         return new Response('Invalid parameters', { status: 400 });
       }
 
       // Ensure cache limits before writing (async check)
-      cacheManager.ensureCacheLimits().catch(err => console.error('Cache limit check failed:', err));
+      if (shouldCache) {
+        cacheManager.ensureCacheLimits().catch(err => console.error('Cache limit check failed:', err));
+      }
 
       // Cache directory
       const cacheDir = cacheManager.getCacheDir();
       await fs.ensureDir(cacheDir);
       
-      // Filename based on chapterId (and maybe server to avoid collisions?)
-      // Use hash of remoteBase + chapterId to be safe
-      const fileHash = crypto.createHash('md5').update(`${remoteBase}-${chapterId}`).digest('hex');
-      const cacheFilePath = path.join(cacheDir, `${fileHash}.mp3`); // Assume mp3 for now, or detect mime
+      // Filename based on chapterId
+      // We prioritize the explicit filename format used by download-chapter: ${chapterId}.mp3
+      const cacheFileName = `${chapterId}.mp3`;
+      const cacheFilePath = path.join(cacheDir, cacheFileName); 
+      
+      // Fallback to hash if needed (legacy)? No, let's stick to one standard.
+      // const fileHash = crypto.createHash('md5').update(`${remoteBase}-${chapterId}`).digest('hex');
+      // const cacheFilePath = path.join(cacheDir, `${fileHash}.mp3`); 
       
       // Check if exists
       if (await fs.pathExists(cacheFilePath)) {
-        const stats = await fs.stat(cacheFilePath);
-        // Basic integrity check: if size is 0, delete it
-        if (stats.size === 0) {
-            console.log('Cache file empty, deleting:', cacheFilePath);
+         // ... (existing serving logic) ...
+         const stats = await fs.stat(cacheFilePath);
+         if (stats.size === 0) {
+            console.log(`Found empty cache file ${cacheFilePath}, deleting.`);
             await fs.unlink(cacheFilePath);
-        } else {
+         } else {
             console.log('Serving from cache:', cacheFilePath);
             const fileUrl = require('url').pathToFileURL(cacheFilePath).href;
-            
-            // Handle range requests if present in original request
             const rangeHeader = request.headers.get('Range');
             
-            // IMPORTANT: If client requests Range, we MUST return 206 Partial Content
-            // net.fetch(file://) usually handles this, BUT we need to make sure 
-            // the response headers are correctly passed back to the audio element.
-            // Sometimes net.fetch returns 200 OK for file:// even with Range header, 
-            // which confuses the audio element if it expects 206.
-            
-            // Let's manually handle file serving for maximum compatibility with audio seeking
+            // Handle Range requests for audio
             if (rangeHeader) {
                 const parts = rangeHeader.replace(/bytes=/, "").split("-");
                 const start = parseInt(parts[0], 10);
                 const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
                 const chunksize = (end - start) + 1;
-                
-                console.log(`Serving Range: ${start}-${end} (Chunk: ${chunksize})`);
-
                 const fileStream = fs.createReadStream(cacheFilePath, { start, end });
-                
-                // Create a Web ReadableStream from Node stream
                 const readable = new ReadableStream({
                     start(controller) {
-                        fileStream.on('data', chunk => controller.enqueue(chunk));
-                        fileStream.on('end', () => controller.close());
-                        fileStream.on('error', err => controller.error(err));
-                    }
+                        fileStream.on('data', chunk => { try { controller.enqueue(chunk); } catch (e) {} });
+                        fileStream.on('end', () => { try { controller.close(); } catch (e) {} });
+                        fileStream.on('error', err => { try { controller.error(err); } catch (e) {} });
+                    },
+                    cancel() { fileStream.destroy(); }
                 });
-
                 return new Response(readable, {
                     status: 206,
                     headers: {
@@ -239,66 +333,154 @@ app.whenReady().then(() => {
                 });
             }
             
-            // No range, return full file
-            return net.fetch(fileUrl);
-        }
+            // Non-range request (e.g. cover or full audio load)
+            const response = await net.fetch(fileUrl);
+            const headers = new Headers(response.headers);
+             
+            if (action === 'stream') {
+                 if (!headers.has('content-type') || headers.get('content-type') === 'application/octet-stream') {
+                      headers.set('content-type', 'audio/mpeg');
+                 }
+            }
+            
+            return new Response(response.body, {
+                status: response.status,
+                headers: headers
+            });
+         }
       }
 
       // Not in cache, fetch from remote
       const remoteUrl = `${remoteBase}/api/stream/${chapterId}`;
       console.log('Fetching remote:', remoteUrl);
       
-      // We need to fetch, stream response to frontend, AND pipe to file.
-      // Using net.request is node-stream based. 
-      // Using global fetch (if available in main process Node 18+) or net.fetch (Electron)
-      
       try {
-        // Handle 302 redirects manually for the audio stream if needed?
-        // net.fetch should follow redirects by default.
-        // But if remoteUrl is a 302 to a signed URL (e.g. S3), it should work.
-        
-        // Use session to share cookies if needed (though we use token)
         const response = await net.fetch(remoteUrl, {
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
 
         if (!response.ok) {
-            console.error(`Stream fetch failed: ${response.status} ${response.statusText}`);
+            console.log(`Remote fetch failed: ${response.status} ${response.statusText}`);
             return response;
         }
 
         // Clone response to split streams?
-        // Response body is a ReadableStream.
-        const [stream1, stream2] = response.body.tee();
-        
-        // Stream 2 goes to file
-        // IMPORTANT: We must handle errors during writing to avoid partial corrupt files being marked as valid.
-        // If writing fails or is incomplete, we should delete the file.
-        saveStreamToFile(stream2, cacheFilePath).catch(async err => {
-            console.error('Cache write failed:', err);
-            // Try to delete partial file - handled in saveStreamToFile catch block usually,
-            // but just in case of async error after that?
-            // saveStreamToFile handles temp file cleanup.
-        });
+        if (shouldCache) {
+            const [stream1, stream2] = response.body.tee();
+            
+            // Stream 2 goes to file
+            saveStreamToFile(stream2, cacheFilePath).catch(async err => {
+                console.error('Cache write failed:', err);
+            });
 
-        // Stream 1 goes to frontend
-        // We need to support Range requests for seeking?
-        // If we are streaming from net.fetch, it might not support range requests easily unless we proxy them.
-        // However, standard HTML5 audio usually handles non-range streams by buffering.
-        // But seeking might be limited until fully downloaded.
-        // For 'ting://' protocol, Electron might handle it.
-        return new Response(stream1, {
-            headers: response.headers,
-            status: response.status,
-            statusText: response.statusText
-        });
+            return new Response(stream1, {
+                headers: response.headers,
+                status: response.status,
+                statusText: response.statusText
+            });
+        } else {
+            // No caching, just pass through
+            return new Response(response.body, {
+                headers: response.headers,
+                status: response.status,
+                statusText: response.statusText
+            });
+        }
 
       } catch (err) {
         console.error('Stream fetch failed:', err);
         return new Response('Fetch failed', { status: 500 });
       }
+    } else if (action === 'cover') {
+        const bookId = url.pathname.replace(/^\//, '');
+        const remoteUrl = url.searchParams.get('remote');
+        // We might not have token here if it's embedded in remoteUrl or not needed for covers
+        // But if needed, we should pass it.
+        
+        if (!bookId) return new Response('Invalid bookId', { status: 400 });
+
+        const cacheDir = cacheManager.getCacheDir();
+        const cacheFilePath = path.join(cacheDir, `cover_${bookId}`);
+
+        // 1. Try Local Cache
+        if (await fs.pathExists(cacheFilePath)) {
+            const fileUrl = require('url').pathToFileURL(cacheFilePath).href;
+            
+            // Explicitly set MIME type if serving from file
+            // Otherwise net.fetch(file://) might guess wrong or return octet-stream
+            const response = await net.fetch(fileUrl);
+            
+            // Override Content-Type if necessary (especially for cover images without extension)
+            const headers = new Headers(response.headers);
+            if (action === 'cover') {
+                // If it's a cover, force image type. We don't know exact type (jpg/png), 
+                // but usually browsers can sniff if we give a hint or if we just let it be?
+                // Actually, without extension, file:// might not set content-type.
+                // Let's assume jpeg or try to detect?
+                // Safe bet: image/jpeg or image/png.
+                // Or better: don't touch if it has one.
+                if (!headers.has('content-type') || headers.get('content-type') === 'application/octet-stream') {
+                     headers.set('content-type', 'image/jpeg'); 
+                }
+            } else if (action === 'stream') {
+                if (!headers.has('content-type') || headers.get('content-type') === 'application/octet-stream') {
+                     headers.set('content-type', 'audio/mpeg');
+                }
+            }
+
+            return new Response(response.body, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: headers
+            });
+        }
+
+        // 2. Fetch Remote (and Cache)
+        if (remoteUrl) {
+             console.log('Fetching remote cover:', remoteUrl);
+             try {
+                 // Note: remoteUrl might already contain query params, take care.
+                 // Add User-Agent to avoid blocking
+                 // Some CDNs like Ximalaya might need specific headers or clean URL
+                 const fetchOptions = {
+                     headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                        'Referer': 'https://www.ximalaya.com/' 
+                     }
+                 };
+                 
+                 const response = await net.fetch(remoteUrl, fetchOptions);
+                 
+                 if (response.ok) {
+                     const [stream1, stream2] = response.body.tee();
+                     
+                     // We must await saving here if we want to guarantee cache existence for subsequent offline access?
+                     // No, tee() allows parallel consumption. But 'saveStreamToFile' is async.
+                     // The issue might be that 'ting://' protocol handler finishes before stream is fully written if we just return stream1?
+                     // No, stream1 is piped to renderer. Stream2 is piped to file.
+                     
+                     saveStreamToFile(stream2, cacheFilePath).catch(err => {
+                         console.error('Cover cache write failed:', err);
+                     });
+                     
+                     // Handle image/png (or others) explicitly if needed?
+                     // If the remote sends Content-Type: image/png, stream1 will have it?
+                     // net.fetch response headers should be preserved.
+                     
+                     return new Response(stream1, {
+                         headers: response.headers,
+                         status: response.status
+                     });
+                 } else {
+                     console.error(`Cover fetch failed with status: ${response.status}`);
+                 }
+             } catch (err) {
+                 console.error('Cover fetch failed:', err);
+             }
+        }
+        
+        return new Response('Cover not found', { status: 404 });
     }
 
     return new Response('Not found', { status: 404 });

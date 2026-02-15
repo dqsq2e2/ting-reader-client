@@ -32,10 +32,19 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
       const savedPassword = localStorage.getItem('saved_password');
       const serverUrl = localStorage.getItem('server_url');
 
-      // If we are already on the login page, skip auto-login
-      if (location.pathname === '/login') {
+      // If we are already on the login page or downloads page, skip auto-login
+      if (location.pathname === '/login' || location.pathname === '/downloads' || location.pathname.startsWith('/offline')) {
         setIsInitializing(false);
         return;
+      }
+
+      // Offline check: If offline, don't try to login, just stop initializing and let router decide
+      // (Router will redirect to login if protected route, or we can redirect to downloads if offline)
+      if (!navigator.onLine) {
+          setIsInitializing(false);
+          // Optional: Redirect to downloads if purely offline?
+          // navigate('/downloads'); 
+          return;
       }
 
       // If no credentials or no server URL, we can't auto-login
@@ -137,6 +146,15 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
               <Loader2 size={16} className="animate-spin" />
               <span className="text-sm font-medium">{statusMessage}</span>
             </div>
+            <button 
+              onClick={() => {
+                setIsInitializing(false);
+                navigate('/login');
+              }}
+              className="mt-4 px-6 py-2 rounded-full text-sm font-medium bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shadow-sm active:scale-95 transition-all"
+            >
+              取消连接
+            </button>
           </div>
         </div>
       </div>

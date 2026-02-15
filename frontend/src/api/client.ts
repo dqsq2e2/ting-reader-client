@@ -13,6 +13,26 @@ const apiClient = axios.create({
 
 apiClient.interceptors.request.use((config) => {
   const { token, activeUrl } = useAuthStore.getState();
+
+  // Offline Mode Check
+  // If we are on the downloads page, we should block API requests to avoid errors
+  // EXCEPT for requests to local proxy or non-api endpoints if any
+  const isOffline = !navigator.onLine;
+  const isDownloadsPage = window.location.pathname.startsWith('/downloads');
+  // Check if it's an API request (either absolute URL or relative to baseURL)
+  const isApiRequest = (config.url?.startsWith('http') || (config.baseURL && config.baseURL.startsWith('http')));
+
+  if ((isDownloadsPage || isOffline) && isApiRequest) {
+      // If user is offline OR on downloads page without a valid session (implied by usage context), 
+      // block external API calls to prevent noise.
+      // But allow if we are online and just happen to be on downloads page (e.g. for cover repair)
+      // Actually, if we are purely offline mode (no token), we should block.
+      if (!token || isOffline) {
+          const controller = new AbortController();
+          config.signal = controller.signal;
+          controller.abort('Offline Mode');
+      }
+  }
   
   // Update baseURL dynamically from store
   if (activeUrl && !config.url?.startsWith('http')) {
@@ -47,6 +67,11 @@ apiClient.interceptors.response.use(
     // Handle Network Error or Connection Refused (potentially redirect expired)
     // Only in Electron environment where we manage serverUrl/activeUrl
     if (!error.response && !originalRequest._retry && (window as any).electronAPI) {
+      // Check for offline mode FIRST
+      if (!navigator.onLine) {
+          return Promise.reject(error);
+      }
+      
       const { serverUrl, activeUrl, setActiveUrl } = useAuthStore.getState();
 
       // If we have a serverUrl and it's different or we want to re-verify

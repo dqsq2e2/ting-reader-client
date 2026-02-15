@@ -39,13 +39,17 @@ export const useTheme = () => {
   }, [theme]);
 
   const refreshTheme = async () => {
+    // Skip if offline or no token
+    const token = localStorage.getItem('auth_token');
+    if (!token || !navigator.onLine) return;
+
     try {
       const response = await apiClient.get('/api/settings');
       if (response.data.theme) {
         applyTheme(response.data.theme);
       }
     } catch (err) {
-      console.error('Failed to refresh theme from server', err);
+      // console.error('Failed to refresh theme from server', err);
     }
   };
 

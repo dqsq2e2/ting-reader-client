@@ -23,10 +23,105 @@ import {
   ArrowLeft,
   ListMusic,
   X,
-  Check
+  Check,
+  Download,
+  Loader2
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { setAlpha, toSolidColor } from '../utils/color';
+import { useDownloadStore } from '../store/downloadStore';
+// getCachedFile is only for mobile, we use electronAPI.checkCached for desktop
+// import { getCachedFile } from '../utils/mobileCacheManager';
+
+interface ProgressBarProps {
+  isMini?: boolean;
+  isSeeking: boolean;
+  seekTime: number;
+  currentTime: number;
+  duration: number;
+  bufferedTime: number;
+  themeColor?: string | null;
+  onSeek: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onSeekStart: () => void;
+  onSeekEnd: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}
+
+const ProgressBar: React.FC<ProgressBarProps> = ({ 
+  isMini = false,
+  isSeeking,
+  seekTime,
+  currentTime,
+  duration,
+  bufferedTime,
+  themeColor,
+  onSeek,
+  onSeekStart,
+  onSeekEnd
+}) => {
+  const displayTime = isSeeking ? seekTime : currentTime;
+  const playedPercent = (displayTime / (duration || 1)) * 100;
+  const bufferedPercent = (bufferedTime / (duration || 1)) * 100;
+  
+  // Safety check for themeColor
+  const safeThemeColor = themeColor || 'rgba(0,0,0,0.15)';
+  const barColor = safeThemeColor ? safeThemeColor.replace('0.15', '1.0').replace('0.1', '1.0') : undefined;
+  
+  return (
+    <div className={`relative group/progress ${isMini ? 'flex-1 h-3 sm:h-2' : 'w-full h-4'} flex items-center select-none touch-none`}>
+      {/* Track Background */}
+      <div 
+        className={`absolute left-0 right-0 top-1/2 -translate-y-1/2 ${isMini ? 'h-1' : 'h-1.5'} bg-slate-300 dark:bg-slate-900 rounded-full overflow-hidden`}
+        // Keeping the original logic for background color if needed, or simplifying
+      >
+        {/* Buffered Bar */}
+        <div 
+          className="absolute inset-y-0 left-0 bg-slate-400/30 dark:bg-slate-700/40 transition-all duration-300" 
+          style={{ width: `${bufferedPercent}%` }}
+        />
+        {/* Played Bar */}
+        <div 
+          className="absolute inset-y-0 left-0 z-10" 
+          style={{ 
+            width: `${playedPercent}%`,
+            backgroundColor: barColor,
+            boxShadow: safeThemeColor ? `0 0 10px ${safeThemeColor.replace('0.15', '0.4').replace('0.1', '0.4')}` : undefined
+          }}
+        />
+      </div>
+
+      {/* Thumb / Handle */}
+      <div 
+        className={`absolute top-1/2 -translate-y-1/2 z-20 w-3 h-3 bg-white rounded-full shadow-md transition-transform duration-100 ease-out pointer-events-none ${isSeeking ? 'scale-150' : 'scale-100'}`}
+        style={{ 
+          left: `${playedPercent}%`, 
+          marginLeft: '-6px',
+          backgroundColor: isSeeking ? '#ffffff' : (barColor || '#ffffff'),
+          border: `1px solid ${barColor || 'transparent'}`
+        }}
+      />
+
+      {/* Range Input for Seeking - Positioned and sized correctly to cover the entire bar */}
+      <input 
+        type="range" 
+        min="0" 
+        max={duration || 0} 
+        step="any"
+        value={displayTime} 
+        onInput={onSeek}
+        onMouseDown={onSeekStart}
+        onTouchStart={onSeekStart}
+        onMouseUp={onSeekEnd}
+        onTouchEnd={onSeekEnd}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30"
+        style={{
+          margin: 0,
+          padding: 0,
+          WebkitAppearance: 'none'
+        }}
+      />
+    </div>
+  );
+};
 
 const Player: React.FC = () => {
   const { token, activeUrl } = useAuthStore();
@@ -35,18 +130,8 @@ const Player: React.FC = () => {
   const getStreamUrl = (chapterId: string) => {
     if ((window as any).electronAPI) {
       // Electron mode: use custom protocol for caching
-      // Fix 302 redirect issue: If API_BASE_URL is a 302 redirect URL (e.g. DDNS),
-      // we must use the RESOLVED base URL, otherwise the 'ting://' protocol handler
-      // in main process might get confused or the 'remote' param will be the redirector
-      // and main process might not follow it correctly inside protocol handler fetch.
-      // Ideally, 'activeUrl' in authStore SHOULD be the resolved final URL.
-      // But just in case, we encode it.
       const remote = encodeURIComponent(API_BASE_URL);
-      // Append a random timestamp to prevent aggressive browser-side caching of the media element
-      // when the file is partial or corrupted? No, 'ting://' handles caching.
-      // But if the file is updated/redownloaded, we might need a cache buster?
-      // Usually not needed for static chapters.
-      return `ting://stream/${chapterId}?token=${token}&remote=${remote}`;
+      return `ting://stream/${chapterId}?token=${token || ''}&remote=${remote}`;
     }
     return `${API_BASE_URL}/api/stream/${chapterId}?token=${token}`;
   };
@@ -69,7 +154,9 @@ const Player: React.FC = () => {
     themeColor,
     setThemeColor,
     playChapter,
-    setIsPlaying
+    setIsPlaying,
+    clientAutoDownload,
+    setClientAutoDownload
   } = usePlayerStore();
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -96,12 +183,26 @@ const Player: React.FC = () => {
   const [editSkipIntro, setEditSkipIntro] = useState(0);
   const [editSkipOutro, setEditSkipOutro] = useState(0);
 
+  const [cachedChapters, setCachedChapters] = useState<Set<string>>(new Set());
+  const { addTask, tasks: downloadTasks } = useDownloadStore();
+  const isElectron = !!(window as any).electronAPI;
+
   // Use stored theme color from book to avoid flash
   useEffect(() => {
     if (currentBook?.theme_color) {
       setThemeColor(currentBook.theme_color);
+    } else if (currentBook?.cover_url) {
+      const fac = new FastAverageColor();
+      const url = getCoverUrl(currentBook.cover_url, currentBook.library_id, currentBook.id);
+      fac.getColorAsync(url, { algorithm: 'dominant' })
+        .then(color => {
+          setThemeColor(color.rgba);
+        })
+        .catch(() => {
+          // Ignore errors
+        });
     }
-  }, [currentBook?.id, currentBook?.theme_color]);
+  }, [currentBook?.id, currentBook?.theme_color, currentBook?.cover_url]);
 
   useEffect(() => {
     if (currentBook) {
@@ -153,25 +254,65 @@ const Player: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [bufferedTime, setBufferedTime] = useState(0);
   const [autoPreload, setAutoPreload] = useState(false);
+  const [autoCache, setAutoCache] = useState(false);
   const isInitialLoadRef = useRef(true);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Fetch settings for auto_preload
   useEffect(() => {
+    if (!navigator.onLine || window.location.hash.includes('/offline')) return;
     apiClient.get('/api/settings').then(res => {
       setAutoPreload(!!res.data.auto_preload);
+      setAutoCache(!!res.data.auto_cache);
+      setClientAutoDownload(!!res.data.client_auto_download);
     }).catch(err => console.error('Failed to fetch settings', err));
   }, []);
 
   // Fetch chapters for the current book
   useEffect(() => {
     if (currentBook?.id) {
+      if (!navigator.onLine || window.location.hash.includes('/offline')) return;
       apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
         setChapters(res.data);
         setCurrentGroupIndex(0); // Reset group index when book changes
       }).catch(err => console.error('Failed to fetch chapters', err));
     }
   }, [currentBook?.id]);
+
+  // Check cache status
+  useEffect(() => {
+    const checkCache = async () => {
+      if (chapters.length === 0) return;
+      
+      const ids = chapters.map(c => `${c.id}.mp3`);
+      const newCached = new Set<string>();
+
+      if (isElectron) {
+        try {
+          const result = await (window as any).electronAPI.checkCached(ids);
+          Object.entries(result).forEach(([file, exists]) => {
+            if (exists) newCached.add(file.replace('.mp3', ''));
+          });
+        } catch (e) {
+          console.error('Failed to check cache (Electron)', e);
+        }
+      }
+      setCachedChapters(newCached);
+    };
+
+    checkCache();
+    // Re-check when tasks change
+    const completedTasks = downloadTasks.filter(t => t.status === 'completed' && t.bookId === currentBook?.id);
+    if (completedTasks.length > 0) {
+        completedTasks.forEach(t => {
+            setCachedChapters(prev => {
+                const next = new Set(prev);
+                next.add(t.chapterId);
+                return next;
+            });
+        });
+    }
+  }, [chapters, downloadTasks, currentBook?.id]);
 
   // Close timer menu when clicking outside
   useEffect(() => {
@@ -220,32 +361,61 @@ const Player: React.FC = () => {
     }
   }, [isPlaying, currentChapter?.id]);
 
-  // Preload next chapter logic
+  // Preload and Server-side Cache next chapter logic
   useEffect(() => {
-    if (!autoPreload || !currentChapter || !currentBook) return;
+    if ((!autoPreload && !autoCache && !clientAutoDownload) || !currentChapter || !currentBook) return;
     
     // Find next chapter index
     apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
       const chapters = res.data;
       const currentIndex = chapters.findIndex((c: any) => c.id === currentChapter.id);
       if (currentIndex !== -1 && currentIndex < chapters.length - 1) {
-        const nextChapterId = chapters[currentIndex + 1].id;
-        const nextSrc = getStreamUrl(nextChapterId);
+        const nextChapter = chapters[currentIndex + 1];
         
-        // Create or update preload element
-        if (!preloadAudioRef.current) {
-          preloadAudioRef.current = new Audio();
-          preloadAudioRef.current.preload = 'auto';
+        // 1. Auto Preload (Memory)
+        if (autoPreload) {
+          const nextSrc = getStreamUrl(nextChapter.id);
+          if (!preloadAudioRef.current) {
+            preloadAudioRef.current = new Audio();
+            preloadAudioRef.current.preload = 'auto';
+          }
+          
+          if (preloadAudioRef.current.src !== nextSrc) {
+            console.log('Preloading next chapter:', nextChapter.title);
+            preloadAudioRef.current.src = nextSrc;
+            preloadAudioRef.current.load();
+          }
         }
-        
-        if (preloadAudioRef.current.src !== nextSrc) {
-          console.log('Preloading next chapter:', chapters[currentIndex + 1].title);
-          preloadAudioRef.current.src = nextSrc;
-          preloadAudioRef.current.load();
+
+        // 2. Auto Cache (Server-side WebDAV)
+        if (autoCache) {
+           console.log('Triggering server-side cache for:', nextChapter.title);
+           apiClient.post(`/api/cache/${nextChapter.id}`).catch(err => {
+              console.error('Failed to trigger server cache', err);
+           });
+        }
+
+        // 3. Client-side Auto Download (Disk) - Only for Electron
+        if (clientAutoDownload && isElectron) {
+           const { tasks, addTask } = useDownloadStore.getState();
+           const existingTask = tasks.find(t => t.id === nextChapter.id);
+           
+           // Only add if not already in queue/completed
+           if (!existingTask) {
+              console.log('Client auto-downloading next chapter:', nextChapter.title);
+              addTask({
+                  id: nextChapter.id,
+                  bookId: currentBook.id,
+                  bookTitle: currentBook.title,
+                  coverUrl: currentBook.cover_url,
+                  chapterId: nextChapter.id,
+                  title: nextChapter.title
+              });
+           }
         }
       }
     }).catch(err => console.error('Preload failed', err));
-  }, [currentChapter?.id, autoPreload, currentBook?.id]);
+  }, [currentChapter?.id, autoPreload, autoCache, clientAutoDownload, currentBook?.id, isElectron]);
 
   // Handle Skip Intro and Outro
   const handleTimeUpdate = () => {
@@ -256,7 +426,6 @@ const Player: React.FC = () => {
 
     // Update buffered time more accurately
     if (audioRef.current.buffered.length > 0) {
-      // Find the range that contains the current time
       let currentRangeEnd = 0;
       for (let i = 0; i < audioRef.current.buffered.length; i++) {
         if (audioRef.current.buffered.start(i) <= time && audioRef.current.buffered.end(i) >= time) {
@@ -265,7 +434,6 @@ const Player: React.FC = () => {
         }
       }
       
-      // If no range contains current time, just use the end of the last range before current time
       if (currentRangeEnd === 0) {
         for (let i = audioRef.current.buffered.length - 1; i >= 0; i--) {
           if (audioRef.current.buffered.start(i) <= time) {
@@ -289,8 +457,6 @@ const Player: React.FC = () => {
 
     // Handle Skip Outro
     if (currentBook?.skip_outro && duration > 0) {
-      // Only skip if the chapter is long enough to actually have an outro
-      // and we've played at least some of it
       const minChapterDuration = (currentBook.skip_intro || 0) + currentBook.skip_outro + 10;
       if (duration > minChapterDuration && (duration - time) <= currentBook.skip_outro) {
         nextChapter();
@@ -362,6 +528,9 @@ const Player: React.FC = () => {
   // Sync progress to backend
   useEffect(() => {
     if (isPlaying && currentBook && currentChapter) {
+      // Skip sync in offline mode
+      if (!navigator.onLine || window.location.hash.includes('/offline')) return;
+
       // Save progress immediately when starting
       const saveProgress = () => {
         apiClient.post('/api/progress', {
@@ -390,7 +559,7 @@ const Player: React.FC = () => {
       // Sync duration back to server if it's significantly different
       if (currentChapter && browserDuration > 0) {
         const diff = Math.abs(browserDuration - (currentChapter.duration || 0));
-        if (diff > 2) {
+        if (diff > 2 && navigator.onLine && !window.location.hash.includes('/offline')) {
           console.log(`Syncing accurate duration for ${currentChapter.title}: ${browserDuration}s`);
           apiClient.patch(`/api/chapters/${currentChapter.id}`, { duration: browserDuration })
             .catch(err => console.error('Failed to sync duration', err));
@@ -399,12 +568,32 @@ const Player: React.FC = () => {
     }
   };
 
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [seekTime, setSeekTime] = useState(0);
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
+    setSeekTime(time);
+    if (!isSeeking) {
+      if (audioRef.current) {
+        audioRef.current.currentTime = time;
+      }
       setCurrentTime(time);
     }
+  };
+
+  const handleSeekStart = () => {
+    setIsSeeking(true);
+    setSeekTime(currentTime);
+  };
+
+  const handleSeekEnd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value);
+    setIsSeeking(false);
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+    }
+    setCurrentTime(time);
   };
 
   const formatTime = (time: number) => {
@@ -446,7 +635,6 @@ const Player: React.FC = () => {
       return;
     }
 
-    // Check if fullscreen is allowed
     if (!document.fullscreenEnabled) {
       console.warn('Fullscreen is not enabled in this context');
       return;
@@ -462,12 +650,9 @@ const Player: React.FC = () => {
       }
     } catch (err) {
       console.error('Error toggling fullscreen:', err);
-      // Do NOT fallback to isExpanded=true if fullscreen fails
-      // This prevents the UI from breaking inside a small iframe
     }
   };
 
-  // Exit Expanded/Fullscreen View
   const handleExitExpanded = async () => {
     if (isWidgetMode && document.fullscreenElement) {
       try {
@@ -479,7 +664,6 @@ const Player: React.FC = () => {
     setIsExpanded(false);
   };
 
-  // Sync state when fullscreen changes (e.g. user presses Esc)
   useEffect(() => {
     if (!isWidgetMode) return;
 
@@ -502,49 +686,15 @@ const Player: React.FC = () => {
     right: isWidgetMode ? '0' : undefined,
   } : {};
 
-  const ProgressBar = ({ isMini = false }) => {
-    const playedPercent = (currentTime / (duration || 1)) * 100;
-    const bufferedPercent = (bufferedTime / (duration || 1)) * 100;
-    
-    // Safety check for themeColor
-    const safeThemeColor = themeColor || 'rgba(0,0,0,0.15)';
-    
-    return (
-      <div className={`relative group/progress ${isMini ? 'flex-1 h-2 sm:h-1.5' : 'w-full h-2.5'} bg-slate-300 dark:bg-slate-900 rounded-full overflow-hidden`}>
-        {/* Buffered Bar */}
-        <div 
-          className="absolute inset-y-0 left-0 bg-slate-400/30 dark:bg-slate-700/40 transition-all duration-300" 
-          style={{ width: `${bufferedPercent}%` }}
-        />
-        {/* Played Bar */}
-        <div 
-          className="absolute inset-y-0 left-0 z-10" 
-          style={{ 
-            width: `${playedPercent}%`,
-            backgroundColor: safeThemeColor.replace('0.15', '1.0').replace('0.1', '1.0'),
-            boxShadow: `0 0 10px ${safeThemeColor.replace('0.15', '0.4').replace('0.1', '0.4')}`
-          }}
-        />
-        {/* Range Input for Seeking */}
-        <input 
-          type="range" 
-          min="0" 
-          max={duration || 0} 
-          value={currentTime} 
-          onChange={handleSeek}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
-        />
-      </div>
-    );
-  };
-
   const handleEnded = () => {
     if (currentBook && currentChapter) {
-      apiClient.post('/api/progress', {
-        bookId: currentBook.id,
-        chapterId: currentChapter.id,
-        position: Math.floor(duration)
-      }).catch(err => console.error('Failed to sync final progress', err));
+      if (navigator.onLine && !window.location.hash.includes('/offline')) {
+        apiClient.post('/api/progress', {
+          bookId: currentBook.id,
+          chapterId: currentChapter.id,
+          position: Math.floor(duration)
+        }).catch(err => console.error('Failed to sync final progress', err));
+      }
     }
     nextChapter();
   };
@@ -563,7 +713,7 @@ const Player: React.FC = () => {
     >
       <audio
         ref={audioRef}
-        src={getStreamUrl(currentChapter.id)}
+        src={getStreamUrl(currentChapter.id) + (isElectron && !clientAutoDownload ? '&cache=0' : '')}
         crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
         onProgress={handleProgress}
@@ -574,7 +724,6 @@ const Player: React.FC = () => {
         onError={(e) => {
           const audio = audioRef.current;
           if (audio && audio.error) {
-            // Ignore aborted errors (code 4)
             if (audio.error.code === 4) {
               console.log('Playback aborted (normal)');
               return;
@@ -633,7 +782,18 @@ const Player: React.FC = () => {
             {/* Widget Vertical Layout: Progress Bar (Visible only on small widget) */}
             {isWidgetMode && (
               <div className="hidden max-[380px]:block w-full px-1 py-1">
-                 <ProgressBar isMini={true} />
+                 <ProgressBar 
+                  isMini={true} 
+                  isSeeking={isSeeking}
+                  seekTime={seekTime}
+                  currentTime={currentTime}
+                  duration={duration}
+                  bufferedTime={bufferedTime}
+                  themeColor={themeColor}
+                  onSeek={handleSeek}
+                  onSeekStart={handleSeekStart}
+                  onSeekEnd={handleSeekEnd}
+                />
               </div>
             )}
 
@@ -682,7 +842,18 @@ const Player: React.FC = () => {
 
               <div className="w-full flex items-center gap-3">
                 <span className="text-[10px] text-slate-400 w-8 text-right">{formatTime(currentTime)}</span>
-                <ProgressBar isMini={true} />
+                <ProgressBar 
+                  isMini={true} 
+                  isSeeking={isSeeking}
+                  seekTime={seekTime}
+                  currentTime={currentTime}
+                  duration={duration}
+                  bufferedTime={bufferedTime}
+                  themeColor={themeColor}
+                  onSeek={handleSeek}
+                  onSeekStart={handleSeekStart}
+                  onSeekEnd={handleSeekEnd}
+                />
                 <span className="text-[10px] text-slate-400 w-8">{formatTime(duration)}</span>
               </div>
             </div>
@@ -690,7 +861,18 @@ const Player: React.FC = () => {
             {/* Mobile Controls - Only visible on small screens */}
             <div className={`flex md:hidden items-center gap-2 sm:gap-3 flex-1 min-w-0 justify-end ${isWidgetMode ? 'max-[380px]:w-full max-[380px]:justify-center max-[380px]:gap-6 max-[380px]:flex-none' : ''}`}>
               <div className="flex-1 min-w-0 h-1.5 py-4 block max-[380px]:hidden">
-                <ProgressBar isMini={true} />
+                <ProgressBar 
+                  isMini={true} 
+                  isSeeking={isSeeking}
+                  seekTime={seekTime}
+                  currentTime={currentTime}
+                  duration={duration}
+                  bufferedTime={bufferedTime}
+                  themeColor={themeColor}
+                  onSeek={handleSeek}
+                  onSeekStart={handleSeekStart}
+                  onSeekEnd={handleSeekEnd}
+                />
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {isWidgetMode && (
@@ -824,39 +1006,27 @@ const Player: React.FC = () => {
 
             <div className="w-full space-y-8 sm:space-y-12">
               {/* Progress Bar Section */}
-              <div className="relative group/progress px-2 sm:px-4">
-                <div className="flex items-center gap-2 sm:gap-4">
-                  <button onClick={prevChapter} className="text-[#4A3728] dark:text-slate-400 opacity-60 hover:opacity-100 transition-opacity">
-                    <SkipBack size={20} className="sm:w-6 sm:h-6" fill="currentColor" />
-                  </button>
-                  <div className="flex-1 relative h-10 sm:h-12 flex items-center">
-                    <div className="absolute inset-x-0 h-1.5 sm:h-2.5 bg-slate-300/40 dark:bg-slate-800 rounded-full overflow-hidden">
-                      <div 
-                        className="absolute inset-y-0 left-0 bg-[#4A3728] dark:bg-primary-600 shadow-[0_0_8px_rgba(74,55,40,0.3)]" 
-                        style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
-                      />
-                    </div>
-                    <div 
-                      className="absolute bg-[#2D1B10]/90 dark:bg-primary-600/90 backdrop-blur-sm text-white px-2.5 sm:px-4 py-1 rounded-full text-[10px] sm:text-xs font-medium z-10 whitespace-nowrap shadow-lg transition-all duration-150 ease-out"
-                      style={{ 
-                        left: `${(currentTime / (duration || 1)) * 100}%`,
-                        transform: 'translateX(-50%)'
-                      }}
-                    >
-                      {formatTime(currentTime)} / {formatTime(duration)}
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max={duration || 0} 
-                      value={currentTime} 
-                      onChange={handleSeek}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+              <div className="px-2 sm:px-4">
+                <div className="flex items-center gap-3 sm:gap-6">
+                  <span className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 min-w-[40px] text-right">
+                    {formatTime(currentTime)}
+                  </span>
+                  <div className="flex-1">
+                    <ProgressBar 
+                      isSeeking={isSeeking}
+                      seekTime={seekTime}
+                      currentTime={currentTime}
+                      duration={duration}
+                      bufferedTime={bufferedTime}
+                      themeColor={themeColor}
+                      onSeek={handleSeek}
+                      onSeekStart={handleSeekStart}
+                      onSeekEnd={handleSeekEnd}
                     />
                   </div>
-                  <button onClick={nextChapter} className="text-[#4A3728] dark:text-slate-400 opacity-30 hover:opacity-60 transition-opacity">
-                    <SkipForward size={20} className="sm:w-6 sm:h-6" fill="currentColor" />
-                  </button>
+                  <span className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 min-w-[40px]">
+                    {formatTime(duration)}
+                  </span>
                 </div>
               </div>
 
@@ -1135,15 +1305,15 @@ const Player: React.FC = () => {
                   {(groups[currentGroupIndex]?.chapters || chapters).map((chapter, index) => {
                     const actualIndex = currentGroupIndex * chaptersPerGroup + index;
                     const isCurrent = currentChapter?.id === chapter.id;
+                    const isCached = cachedChapters.has(chapter.id);
+                    const downloadTask = downloadTasks.find(t => t.id === chapter.id);
+                    const isDownloading = downloadTask?.status === 'pending' || downloadTask?.status === 'downloading';
                     
                     return (
                       <div 
                         key={chapter.id}
-                        onClick={() => {
-                          playChapter(currentBook!, chapters, chapter);
-                          setShowChapters(false);
-                        }}
-                        className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
+                        id={`player-chapter-${chapter.id}`}
+                        className={`group flex items-center justify-between p-4 rounded-2xl transition-all border ${
                           isCurrent 
                             ? 'bg-opacity-10 border-opacity-20' 
                             : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary-200 dark:hover:border-primary-800'
@@ -1153,7 +1323,13 @@ const Player: React.FC = () => {
                           borderColor: themeColor.replace('0.15', '0.3').replace('0.1', '0.3'),
                         } : {}}
                       >
-                        <div className="flex items-center gap-4 min-w-0">
+                        <div 
+                          className="flex items-center gap-4 min-w-0 flex-1 cursor-pointer"
+                          onClick={() => {
+                            playChapter(currentBook!, chapters, chapter);
+                            setShowChapters(false);
+                          }}
+                        >
                           <div 
                             className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
                               isCurrent ? 'text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
@@ -1185,16 +1361,50 @@ const Player: React.FC = () => {
                                   {getChapterProgressText(chapter)}
                                 </div>
                               )}
+                              {isCached && (
+                                <div className="flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                   <Check size={10} />
+                                   已缓存
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
-                        {isCurrent && isPlaying && (
-                          <div className="flex gap-1 items-end h-5">
-                            <div className="w-1 animate-music-bar-1 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
-                            <div className="w-1 animate-music-bar-2 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
-                            <div className="w-1 animate-music-bar-3 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
-                          </div>
-                        )}
+                        
+                        <div className="flex items-center gap-4 pl-4 border-l border-slate-100 dark:border-slate-800 ml-4">
+                          {!isCached && !isDownloading && (
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                addTask({
+                                  id: chapter.id,
+                                  bookId: currentBook!.id,
+                                  bookTitle: currentBook!.title,
+                                  coverUrl: currentBook!.cover_url,
+                                  chapterId: chapter.id,
+                                  title: chapter.title
+                                });
+                              }}
+                              className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-full transition-all"
+                              title="下载缓存"
+                            >
+                              <Download size={18} />
+                            </button>
+                          )}
+                          {isDownloading && (
+                             <div className="p-2">
+                                <Loader2 size={18} className="text-primary-500 animate-spin" />
+                             </div>
+                          )}
+
+                          {isCurrent && isPlaying && (
+                            <div className="flex gap-1 items-end h-5">
+                              <div className="w-1 animate-music-bar-1 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
+                              <div className="w-1 animate-music-bar-2 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
+                              <div className="w-1 animate-music-bar-3 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })}

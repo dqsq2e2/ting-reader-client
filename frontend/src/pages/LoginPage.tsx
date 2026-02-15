@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
-import { Lock, User, Server } from 'lucide-react';
+import { Lock, User, Server, Download } from 'lucide-react';
 import logoImg from '../assets/logo.png';
 
 const LoginPage: React.FC = () => {
@@ -244,6 +244,18 @@ const LoginPage: React.FC = () => {
             >
               {loading ? '正在登录...' : '登录'}
             </button>
+
+            {/* Offline Mode Button */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                    type="button"
+                    onClick={() => navigate('/offline')}
+                    className="w-full py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 font-semibold rounded-lg transition-all flex items-center justify-center gap-2"
+                >
+                    <Download size={20} />
+                    离线模式 / 缓存管理
+                </button>
+            </div>
           </form>
         </div>
       </div>

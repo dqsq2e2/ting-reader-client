@@ -13,19 +13,23 @@ import {
   Database,
   Users,
   Terminal,
-  Headphones
+  Headphones,
+  Download
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../hooks/useTheme';
 import { usePlayerStore } from '../store/playerStore';
 import apiClient from '../api/client';
 import logoImg from '../assets/logo.png';
+import { isApp, isElectron } from '../utils/env';
 
 import Player from './Player';
 
 const Layout: React.FC = () => {
   const { refreshTheme } = useTheme(); // Initialize theme application
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -35,9 +39,42 @@ const Layout: React.FC = () => {
   const hasCurrentChapter = usePlayerStore(state => !!state.currentChapter);
   const setPlaybackSpeed = usePlayerStore(state => state.setPlaybackSpeed);
 
+  // Validate Token on Mount
+  React.useEffect(() => {
+    const validateConnection = async () => {
+      // Offline Check
+      if (!navigator.onLine) {
+         setIsConnecting(false);
+         return;
+      }
+      
+      setIsConnecting(true);
+      setConnectionError(null);
+      try {
+        // Try to fetch current user info to validate token
+        await apiClient.get('/api/me');
+        setIsConnecting(false);
+      } catch (err: any) {
+        console.error('Connection validation failed', err);
+        // Don't auto-logout immediately, give user a chance to see error or retry
+        setConnectionError('连接服务器失败或登录已过期');
+        setIsConnecting(false);
+      }
+    };
+
+    if (user) {
+      validateConnection();
+    } else {
+      setIsConnecting(false);
+    }
+  }, [user]);
+
   // Fetch and apply user settings
   React.useEffect(() => {
-    if (user) {
+    // Offline check
+    if (!navigator.onLine) return;
+
+    if (user && !isConnecting && !connectionError) {
       apiClient.get('/api/settings').then(res => {
         const settings = res.data;
         if (settings.playback_speed) {
@@ -45,29 +82,56 @@ const Layout: React.FC = () => {
         }
       }).catch(err => console.error('Failed to sync user settings', err));
     }
-  }, [user?.id, setPlaybackSpeed]);
+  }, [user?.id, setPlaybackSpeed, isConnecting, connectionError]);
 
   React.useEffect(() => {
     refreshTheme();
   }, []);
 
+  const isOffline = !navigator.onLine;
+
   const menuItems = [
-    { icon: <Home size={20} />, label: '首页', path: '/' },
-    { icon: <Library size={20} />, label: '书架', path: '/bookshelf' },
-    { icon: <Search size={20} />, label: '搜索', path: '/search' },
-    { icon: <Heart size={20} />, label: '收藏', path: '/favorites' },
-  ];
+    { icon: <Home size={20} />, label: '首页', path: '/', requireAuth: true, onlineOnly: true },
+    { icon: <Library size={20} />, label: '书架', path: '/bookshelf', requireAuth: true, onlineOnly: true },
+    { icon: <Search size={20} />, label: '搜索', path: '/search', requireAuth: true, onlineOnly: true },
+    { icon: <Heart size={20} />, label: '收藏', path: '/favorites', requireAuth: true, onlineOnly: true },
+  ].filter(item => {
+      // If offline, hide onlineOnly items
+      if (isOffline && item.onlineOnly) return false;
+      // If user is logged in, show all (except offline filtered)
+      // If not logged in, only show !requireAuth (none currently)
+      return user ? true : !item.requireAuth;
+  });
 
   const adminItems = [
-    { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries' },
-    { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks' },
-    { icon: <Users size={20} />, label: '用户管理', path: '/admin/users' },
-  ];
+    { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries', onlineOnly: true },
+    { icon: <Download size={20} />, label: '缓存管理', path: '/downloads' },
+    { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks', onlineOnly: true },
+    { icon: <Users size={20} />, label: '用户管理', path: '/admin/users', onlineOnly: true },
+  ].filter(item => {
+      if (isOffline && item.onlineOnly) return false;
+      return true;
+  });
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
+
+  // If in offline mode, just render the DownloadsPage content directly?
+  // But user might want to access settings.
+  // The user said: "直接增加点击离线登录直接展示一个纯净的缓存管理界面"
+  // So if offline, maybe we don't even need the full Layout with sidebar?
+  // Or just simplified sidebar.
+  // For now, let's keep the simplified sidebar (Cache + Settings).
+  // But remove the "expand/collapse" button for "Admin/More" section if it's just local features.
+  
+  // Actually, user complained about "管理后台的展开按钮" (referring to the mobile view or desktop "More" section?).
+  // In my previous response I renamed "管理后台" to "本地功能".
+  // Maybe user wants NO sidebar at all? "纯净的缓存管理界面".
+  // But navigation to Settings is useful.
+  
+  // Let's refine the sidebar rendering to be super minimal in offline mode.
 
   const NavLink = ({ item, mobile = false }: { item: typeof menuItems[0], mobile?: boolean }) => {
     const isActive = location.pathname === item.path;
@@ -126,14 +190,29 @@ const Layout: React.FC = () => {
           </div>
 
           <nav className="flex-1 space-y-1 overflow-y-auto custom-scrollbar">
+            {!isOffline && (
             <div className="xl:block hidden">
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4">主菜单</div>
+              {menuItems.length > 0 && (
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4">主菜单</div>
+              )}
               {menuItems.map((item) => <NavLink key={item.path} item={item} />)}
             </div>
+            )}
 
             <div className="xl:mt-8">
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4 xl:mt-0">管理后台</div>
+              {!isOffline && (
+              <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4 xl:mt-0">
+                  {user ? '管理后台' : '更多'}
+              </div>
+              )}
+              
+              {/* Online Admin Items */}
               {user?.role === 'admin' && adminItems.map((item) => <NavLink key={item.path} item={item} />)}
+              
+              {/* Cache Management (Always show) */}
+              <NavLink item={{ icon: <Download size={20} />, label: '缓存管理', path: '/downloads' }} />
+              
+              {/* Settings (Always show) */}
               <Link
                 to="/settings"
                 onClick={() => setIsSidebarOpen(false)}
@@ -150,24 +229,36 @@ const Layout: React.FC = () => {
           </nav>
 
           <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl">
-              <div className="flex items-center gap-3 overflow-hidden">
-                <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-600 shrink-0 font-bold text-sm">
-                  {user?.username.charAt(0).toUpperCase()}
+            {user ? (
+              <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-600 shrink-0 font-bold text-sm">
+                    {user.username.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="truncate">
+                    <p className="text-sm font-bold dark:text-white truncate">{user.username}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{user.role === 'admin' ? 'Administrator' : 'User'}</p>
+                  </div>
                 </div>
-                <div className="truncate">
-                  <p className="text-sm font-bold dark:text-white truncate">{user?.username}</p>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{user?.role === 'admin' ? 'Administrator' : 'User'}</p>
-                </div>
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                  title="退出登录"
+                >
+                  <LogOut size={20} />
+                </button>
               </div>
-              <button 
-                onClick={handleLogout}
-                className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-                title="退出登录"
-              >
-                <LogOut size={20} />
-              </button>
-            </div>
+            ) : (
+              <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl text-center">
+                 <p className="text-xs font-bold text-slate-500 mb-2">离线模式</p>
+                 <button
+                    onClick={() => navigate('/login')}
+                    className="w-full py-2 bg-primary-600 text-white text-xs font-bold rounded-lg hover:bg-primary-700 transition-colors"
+                 >
+                    登录
+                 </button>
+              </div>
+            )}
           </div>
         </div>
       </aside>

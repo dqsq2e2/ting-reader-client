@@ -22,10 +22,15 @@ import {
   Sparkles,
   Loader2,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Download,
+  Check
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { useAuthStore } from '../store/authStore';
+import { useDownloadStore } from '../store/downloadStore';
+// getCachedFile is only for mobile
+// import { getCachedFile } from '../utils/mobileCacheManager';
 import ExpandableTitle from '../components/ExpandableTitle';
 import { setAlpha, toSolidColor } from '../utils/color';
 
@@ -53,6 +58,65 @@ const BookDetailPage: React.FC = () => {
   const [isTagsOverflowing, setIsTagsOverflowing] = useState(false);
   const descriptionRef = useRef<HTMLParagraphElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  const [cachedChapters, setCachedChapters] = useState<Set<string>>(new Set());
+  const { addTask, tasks: downloadTasks } = useDownloadStore();
+
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [selectedChapters, setSelectedChapters] = useState<Set<string>>(new Set());
+
+  const isElectron = !!(window as any).electronAPI;
+
+  // Check cache status
+  useEffect(() => {
+    const checkCache = async () => {
+      if (chapters.length === 0) return;
+      
+      const ids = chapters.map(c => `${c.id}.mp3`);
+      const newCached = new Set<string>();
+
+      if (isElectron) {
+        try {
+          const result = await (window as any).electronAPI.checkCached(ids);
+          Object.entries(result).forEach(([file, exists]) => {
+            if (exists) newCached.add(file.replace('.mp3', ''));
+          });
+        } catch (e) {
+          console.error('Failed to check cache (Electron)', e);
+        }
+      } else {
+        // Mobile mode (Capacitor) - only in ting-reader-app
+        try {
+          /*
+          await Promise.all(chapters.map(async (c) => {
+             const path = await getCachedFile(`${c.id}.mp3`);
+             if (path) newCached.add(c.id);
+          }));
+          */
+        } catch (e) {
+          console.error('Failed to check cache', e);
+        }
+      }
+      setCachedChapters(newCached);
+    };
+
+    checkCache();
+    // Re-check when tasks change (simple way to update status after download)
+    const completedTasks = downloadTasks.filter(t => t.status === 'completed' && t.bookId === book?.id);
+    if (completedTasks.length > 0) {
+        // Optimistically update
+        completedTasks.forEach(t => {
+            setCachedChapters(prev => {
+                const next = new Set(prev);
+                next.add(t.chapterId);
+                return next;
+            });
+        });
+    } else if (downloadTasks.length === 0 && cachedChapters.size > 0) {
+        // If tasks are empty (e.g. cleared in Settings), re-check cache to ensure UI is in sync
+        checkCache();
+    }
+  }, [chapters, downloadTasks, book?.id]);
 
   const scrollGroups = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
@@ -159,6 +223,46 @@ const BookDetailPage: React.FC = () => {
     };
   }, [book?.tags]);
 
+  useEffect(() => {
+    if (book && currentChapter && (currentChapter.book_id === book.id || currentChapter.bookId === book.id)) {
+      // Determine if current chapter is in main or extra
+      // Note: We need to find it in the lists.
+      const inMain = mainChapters.find(c => c.id === currentChapter.id);
+      const inExtra = extraChapters.find(c => c.id === currentChapter.id);
+      
+      let targetList = currentChapters;
+      
+      if (inMain) {
+        if (activeTab !== 'main') {
+          setActiveTab('main');
+        }
+        targetList = mainChapters;
+      } else if (inExtra) {
+        if (activeTab !== 'extra') {
+          setActiveTab('extra');
+        }
+        targetList = extraChapters;
+      }
+      
+      // Calculate group index
+      const index = targetList.findIndex(c => c.id === currentChapter.id);
+      if (index !== -1) {
+        const groupIndex = Math.floor(index / chaptersPerGroup);
+        if (currentGroupIndex !== groupIndex) {
+          setCurrentGroupIndex(groupIndex);
+        }
+        
+        // Scroll into view
+        setTimeout(() => {
+          const el = document.getElementById(`chapter-${currentChapter.id}`);
+          if (el) {
+            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
+        }, 100);
+      }
+    }
+  }, [book?.id, currentChapter?.id, mainChapters, extraChapters, activeTab, currentGroupIndex]);
+
   const toggleFavorite = async () => {
     try {
       if (isFavorite) {
@@ -244,10 +348,63 @@ const BookDetailPage: React.FC = () => {
 
   const getTitleFontSize = (title: string) => {
     // Responsive font size: subtle scaling from mobile to desktop
-    return 'text-xl sm:text-2xl md:text-3xl';
+    return 'text-lg max-[370px]:text-base sm:text-2xl md:text-3xl';
   };
 
   const displayThemeColor = themeColor || book?.theme_color;
+
+  const toggleBatchMode = () => {
+    setIsBatchMode(!isBatchMode);
+    setSelectedChapters(new Set());
+  };
+
+  const toggleChapterSelection = (chapterId: string) => {
+    const newSelected = new Set(selectedChapters);
+    if (newSelected.has(chapterId)) {
+      newSelected.delete(chapterId);
+    } else {
+      newSelected.add(chapterId);
+    }
+    setSelectedChapters(newSelected);
+  };
+
+  const handleSelectAll = () => {
+    // Check if all VISIBLE chapters are selected (based on currentChapters which respects tabs)
+    const allSelected = currentChapters.every(c => selectedChapters.has(c.id));
+    
+    if (allSelected) {
+      setSelectedChapters(new Set());
+    } else {
+      const newSelected = new Set(selectedChapters);
+      currentChapters.forEach(c => newSelected.add(c.id));
+      setSelectedChapters(newSelected);
+    }
+  };
+
+  const handleDownloadSelected = () => {
+    const chaptersToDownload = currentChapters.filter(c => selectedChapters.has(c.id));
+    // Filter out already cached or downloading
+    const validChapters = chaptersToDownload.filter(c => {
+        const isCached = cachedChapters.has(c.id);
+        const task = downloadTasks.find(t => t.id === c.id);
+        const isDownloading = task?.status === 'pending' || task?.status === 'downloading';
+        return !isCached && !isDownloading;
+    });
+
+    validChapters.forEach(c => {
+      addTask({
+        id: c.id,
+        bookId: book!.id,
+        bookTitle: book!.title,
+        coverUrl: book!.cover_url,
+        themeColor: book!.theme_color,
+        chapterId: c.id,
+        title: c.title
+      });
+    });
+    setIsBatchMode(false);
+    setSelectedChapters(new Set());
+  };
 
   useEffect(() => {
     if (displayThemeColor) {
@@ -359,24 +516,24 @@ const BookDetailPage: React.FC = () => {
             <div className="flex gap-3 max-w-md mx-auto md:mx-0">
               <button 
                 onClick={() => playBook(book, chapters)}
-                className="flex-1 flex items-center justify-center gap-2 px-8 py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group"
+                className="flex-1 flex items-center justify-center gap-2 px-8 py-4 max-[370px]:px-4 max-[370px]:py-3 max-[370px]:text-sm bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group"
                 style={themeColor ? { 
                   backgroundColor: toSolidColor(themeColor),
                   boxShadow: `0 10px 20px -5px ${setAlpha(themeColor, 0.3)}`
                 } : {}}
               >
-                <Play size={20} fill="currentColor" />
+                <Play size={20} fill="currentColor" className="max-[370px]:w-4 max-[370px]:h-4" />
                 立即播放
               </button>
               <button 
                 onClick={toggleFavorite}
-                className={`p-3.5 rounded-2xl border transition-all active:scale-95 ${
+                className={`p-3.5 max-[370px]:p-3 rounded-2xl border transition-all active:scale-95 ${
                   isFavorite 
                     ? 'bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30' 
                     : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-red-500'
                 }`}
               >
-                <Heart size={24} fill={isFavorite ? "currentColor" : "none"} />
+                <Heart size={24} fill={isFavorite ? "currentColor" : "none"} className="max-[370px]:w-5 max-[370px]:h-5" />
               </button>
               {user?.role === 'admin' && (
                 <button 
@@ -384,9 +541,9 @@ const BookDetailPage: React.FC = () => {
                     setEditData({ ...book });
                     setIsEditModalOpen(true);
                   }}
-                  className="p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95"
+                  className="p-3.5 max-[370px]:p-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95"
                 >
-                  <Edit size={24} />
+                  <Edit size={24} className="max-[370px]:w-5 max-[370px]:h-5" />
                 </button>
               )}
             </div>
@@ -435,7 +592,8 @@ const BookDetailPage: React.FC = () => {
             章节列表
           </h2>
           
-          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start">
+          <div className="flex items-center gap-2 self-start">
+            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
             <button 
               onClick={() => { setActiveTab('main'); setCurrentGroupIndex(0); }}
               className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
@@ -458,6 +616,18 @@ const BookDetailPage: React.FC = () => {
                 番外 ({extraChapters.length})
               </button>
             )}
+            </div>
+
+            <button
+                onClick={toggleBatchMode}
+                className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-all border ${
+                    isBatchMode 
+                        ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 border-primary-200 dark:border-primary-800' 
+                        : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+                }`}
+            >
+                {isBatchMode ? '取消选择' : '批量下载'}
+            </button>
           </div>
         </div>
 
@@ -505,23 +675,54 @@ const BookDetailPage: React.FC = () => {
           {(groups[currentGroupIndex]?.chapters || currentChapters).map((chapter, index) => {
             const actualIndex = currentGroupIndex * chaptersPerGroup + index;
             const isCurrent = currentChapter?.id === chapter.id;
+            const isCached = cachedChapters.has(chapter.id);
+            const downloadTask = downloadTasks.find(t => t.id === chapter.id);
+            const isDownloading = downloadTask?.status === 'pending' || downloadTask?.status === 'downloading';
+            const isSelected = selectedChapters.has(chapter.id);
+            const hasMobileAction = !isCached || isDownloading || (isCurrent && isPlaying);
+            
             return (
               <div 
                 key={chapter.id}
-                onClick={() => playChapter(book!, chapters, chapter)}
+                id={`chapter-${chapter.id}`}
                 className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
                   isCurrent 
                     ? 'bg-opacity-10 border-opacity-20' 
-                    : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary-200 dark:hover:border-primary-800'
+                    : isSelected 
+                        ? 'bg-primary-50 dark:bg-primary-900/10 border-primary-200 dark:border-primary-800'
+                        : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary-200 dark:hover:border-primary-800'
                 }`}
                 style={isCurrent && themeColor ? { 
                   backgroundColor: setAlpha(themeColor, 0.1),
                   borderColor: setAlpha(themeColor, 0.3),
                 } : {}}
+                onClick={() => isBatchMode && toggleChapterSelection(chapter.id)}
               >
-                <div className="flex items-center gap-4 min-w-0">
+                {isBatchMode && (
+                    <div className="pr-4">
+                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+                            isSelected 
+                                ? 'bg-primary-600 border-primary-600 text-white' 
+                                : 'border-slate-300 dark:border-slate-600'
+                        }`}>
+                            {isSelected && <Check size={12} strokeWidth={3} />}
+                        </div>
+                    </div>
+                )}
+
+                <div 
+                  className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 cursor-pointer"
+                  onClick={(e) => {
+                      if (isBatchMode) {
+                          e.stopPropagation();
+                          toggleChapterSelection(chapter.id);
+                      } else {
+                          playChapter(book!, chapters, chapter);
+                      }
+                  }}
+                >
                   <div 
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg shrink-0 ${
+                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
                       isCurrent ? 'text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                     }`}
                     style={isCurrent && themeColor ? { backgroundColor: toSolidColor(themeColor) } : {}}
@@ -535,14 +736,14 @@ const BookDetailPage: React.FC = () => {
                     >
                       {chapter.title}
                     </p>
-                    <div className="flex items-center gap-3 mt-1">
+                    <div className="flex items-center gap-2 mt-1">
                       <div className="flex items-center gap-1 text-xs text-slate-400 font-medium">
                         <Clock size={12} />
                         {formatDuration(chapter.duration)}
                       </div>
                       {getChapterProgressText(chapter) && (
                         <div 
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap ${
                             getChapterProgressText(chapter) === '已播完' 
                               ? 'bg-green-50 text-green-500 dark:bg-green-900/20' 
                               : 'bg-primary-50 text-primary-600 dark:bg-primary-900/20'
@@ -551,21 +752,60 @@ const BookDetailPage: React.FC = () => {
                           {getChapterProgressText(chapter)}
                         </div>
                       )}
+                      {isCached && (
+                        <div className="flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 whitespace-nowrap">
+                           <Check size={10} />
+                           已缓存
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-4">
-                  {isCurrent && isPlaying ? (
-                    <div className="flex gap-1 items-end h-5">
+                <div className={`items-center border-l border-slate-100 dark:border-slate-800 transition-all ${
+                  hasMobileAction 
+                    ? 'flex gap-2 pl-2 ml-2 sm:gap-4 sm:pl-4 sm:ml-4' 
+                    : 'hidden sm:flex sm:gap-4 sm:pl-4 sm:ml-4'
+                }`}>
+                  {!isBatchMode && !isCached && !isDownloading && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        addTask({
+                          id: chapter.id,
+                          bookId: book!.id,
+                          bookTitle: book!.title,
+                          coverUrl: book!.cover_url,
+                          themeColor: book!.theme_color,
+                          chapterId: chapter.id,
+                          title: chapter.title
+                        });
+                      }}
+                      className="p-1.5 sm:p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-full transition-all"
+                      title="下载缓存"
+                    >
+                      <Download size={18} />
+                    </button>
+                  )}
+                  {isDownloading && (
+                     <div className="p-1.5 sm:p-2">
+                        <Loader2 size={18} className="text-primary-500 animate-spin" />
+                     </div>
+                  )}
+
+                  {!isBatchMode && isCurrent && isPlaying ? (
+                    <div className="flex gap-1 items-end h-5 w-10 justify-center">
                       <div className="w-1 animate-music-bar-1 rounded-full" style={themeColor ? { backgroundColor: toSolidColor(themeColor) } : {}}></div>
                       <div className="w-1 animate-music-bar-2 rounded-full" style={themeColor ? { backgroundColor: toSolidColor(themeColor) } : {}}></div>
                       <div className="w-1 animate-music-bar-3 rounded-full" style={themeColor ? { backgroundColor: toSolidColor(themeColor) } : {}}></div>
                     </div>
-                  ) : (
-                    <div className="w-10 h-10 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                  ) : !isBatchMode && (
+                    <button
+                      onClick={() => playChapter(book!, chapters, chapter)}
+                      className="hidden sm:flex w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-50 dark:bg-slate-800 items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:scale-105"
+                    >
                       <Play size={16} className="text-primary-600 ml-1" fill="currentColor" style={themeColor ? { color: toSolidColor(themeColor) } : {}} />
-                    </div>
+                    </button>
                   )}
                 </div>
               </div>
@@ -574,132 +814,163 @@ const BookDetailPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Batch Action Bar */}
+      {isBatchMode && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] animate-in slide-in-from-bottom duration-300 shadow-[0_-4px_20px_rgba(0,0,0,0.1)]">
+            <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={handleSelectAll}
+                        className="px-4 py-2 font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
+                    >
+                        {selectedChapters.size === currentChapters.length ? '取消全选' : '全选本页'}
+                    </button>
+                    <span className="text-sm font-bold text-slate-500">
+                        已选 {selectedChapters.size} 章
+                    </span>
+                </div>
+                
+                <button
+                    onClick={handleDownloadSelected}
+                    disabled={selectedChapters.size === 0}
+                    className="flex-1 max-w-[200px] px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:shadow-none text-sm"
+                >
+                    <Download size={18} />
+                    下载选中
+                </button>
+            </div>
+        </div>
+      )}
+
       {/* Edit Modal */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsEditModalOpen(false)}></div>
           <div className="relative w-full max-w-2xl max-h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-y-auto animate-in zoom-in-95 duration-200 no-scrollbar">
-            <div className="p-6 md:p-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold dark:text-white">编辑书籍元数据</h2>
+            <div className="p-4 sm:p-6 md:p-8">
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <h2 className="text-xl sm:text-2xl font-bold dark:text-white">编辑书籍元数据</h2>
                 <button 
                   onClick={handleScrape}
                   disabled={scraping}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 rounded-xl text-sm font-bold hover:bg-primary-100 transition-all disabled:opacity-50"
+                  className="flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 rounded-xl text-xs sm:text-sm font-bold hover:bg-primary-100 transition-all disabled:opacity-50"
                 >
-                  {scraping ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
-                  自动刮削 (喜马拉雅)
+                  {scraping ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
+                  <span className="hidden sm:inline">自动刮削 (喜马拉雅)</span>
+                  <span className="sm:hidden">刮削</span>
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                <div className="space-y-3 sm:space-y-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">书名</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">书名</label>
                     <input 
                       type="text" 
                       value={editData.title || ''}
                       onChange={e => setEditData({...editData, title: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">作者</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">作者</label>
                     <input 
                       type="text" 
                       value={editData.author || ''}
                       onChange={e => setEditData({...editData, author: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">演播者</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">演播者</label>
                     <input 
                       type="text" 
                       value={editData.narrator || ''}
                       onChange={e => setEditData({...editData, narrator: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">标签 (逗号分隔)</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">标签 (逗号分隔)</label>
                     <input 
                       type="text" 
                       value={editData.tags || ''}
                       onChange={e => setEditData({...editData, tags: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
                 </div>
                 
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">封面 URL</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">封面 URL</label>
                     <input 
                       type="text" 
                       value={editData.cover_url || ''}
                       onChange={e => setEditData({...editData, cover_url: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">跳过片头 (秒)</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">跳过片头 (秒)</label>
                       <input 
                         type="number" 
                         value={editData.skip_intro || 0}
                         onChange={e => setEditData({...editData, skip_intro: parseInt(e.target.value) || 0})}
-                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                        className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">跳过片尾 (秒)</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">跳过片尾 (秒)</label>
                       <input 
                         type="number" 
                         value={editData.skip_outro || 0}
                         onChange={e => setEditData({...editData, skip_outro: parseInt(e.target.value) || 0})}
-                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                        className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                       />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">简介</label>
+              <div className="mt-4 sm:mt-6 space-y-1">
+                <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">简介</label>
                 <textarea 
                   rows={4}
                   value={editData.description || ''}
                   onChange={e => setEditData({...editData, description: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white resize-none"
+                  className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white resize-none"
                 />
               </div>
 
-              <div className="flex gap-4 mt-8">
+              <div className="flex flex-col-reverse sm:flex-row gap-3 sm:gap-4 mt-6 sm:mt-8">
                 <button 
                   onClick={() => {
                     setIsEditModalOpen(false);
                     setIsDeleteModalOpen(true);
                   }}
-                  className="px-4 py-3 font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all flex items-center gap-2"
+                  className="px-4 py-2.5 sm:py-3 font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all flex items-center justify-center gap-2 sm:justify-start"
                 >
-                  <Trash2 size={20} />
+                  <Trash2 size={18} className="sm:w-5 sm:h-5" />
                   删除书籍
                 </button>
                 <div className="flex-1" />
-                <button 
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
-                >
-                  取消
-                </button>
-                <button 
-                  onClick={handleEditSave}
-                  className="px-8 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 transition-all"
-                >
-                  <Save size={20} />
-                  保存更改
-                </button>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-sm sm:text-base"
+                  >
+                    取消
+                  </button>
+                  <button 
+                    onClick={handleEditSave}
+                    className="flex-1 sm:flex-none px-6 sm:px-8 py-2.5 sm:py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 transition-all text-sm sm:text-base"
+                  >
+                    <Save size={18} className="sm:w-5 sm:h-5" />
+                    保存更改
+                  </button>
+                </div>
               </div>
             </div>
           </div>

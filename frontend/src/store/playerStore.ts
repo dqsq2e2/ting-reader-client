@@ -11,6 +11,7 @@ interface PlayerState {
   playbackSpeed: number;
   volume: number;
   themeColor: string;
+  clientAutoDownload: boolean;
   
   // Actions
   playBook: (book: Book, chapters: Chapter[], startChapterId?: string) => void;
@@ -20,6 +21,7 @@ interface PlayerState {
   setPlaybackSpeed: (speed: number) => void;
   setVolume: (volume: number) => void;
   setThemeColor: (color: string) => void;
+  setClientAutoDownload: (enabled: boolean) => void;
   nextChapter: () => void;
   prevChapter: () => void;
   playChapter: (book: Book, chapters: Chapter[], chapter: Chapter, resumePosition?: number) => void;
@@ -36,8 +38,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   playbackSpeed: 1.0,
   volume: 1.0,
   themeColor: '#F2EDE4', // Default background color
+  clientAutoDownload: false,
 
   setIsPlaying: (isPlaying) => set({ isPlaying }),
+  setClientAutoDownload: (enabled) => set({ clientAutoDownload: enabled }),
 
   playBook: (book, chapters, startChapterId) => {
     // If no startChapterId is provided, find the most recently played chapter
@@ -67,6 +71,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     if (book.theme_color) {
       newState.themeColor = book.theme_color;
+    } else {
+      newState.themeColor = '#F2EDE4'; // Reset to default
     }
 
     set(newState);
@@ -121,6 +127,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     if (book.theme_color) {
       newState.themeColor = book.theme_color;
+    } else {
+      newState.themeColor = '#F2EDE4'; // Reset to default
     }
 
     set(newState);
