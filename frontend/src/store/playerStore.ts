@@ -89,17 +89,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setVolume: (volume) => set({ volume }),
 
   setThemeColor: (color) => set({ themeColor: color }),
+  setClientAutoDownload: (enabled) => set({ clientAutoDownload: enabled }),
 
   nextChapter: () => {
     const { currentChapter, chapters } = get();
     if (!currentChapter) return;
     const index = chapters.findIndex(c => c.id === currentChapter.id);
     if (index < chapters.length - 1) {
-      const nextChapter = chapters[index + 1];
-      set({ 
-        currentChapter: nextChapter, 
-        currentTime: (nextChapter as any).progress_position || 0 
-      });
+      get().playChapter(get().currentBook!, chapters, chapters[index + 1]);
     }
   },
 
@@ -108,29 +105,23 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (!currentChapter) return;
     const index = chapters.findIndex(c => c.id === currentChapter.id);
     if (index > 0) {
-      const prevChapter = chapters[index - 1];
-      set({ 
-        currentChapter: prevChapter, 
-        currentTime: (prevChapter as any).progress_position || 0 
-      });
+      get().playChapter(get().currentBook!, chapters, chapters[index - 1]);
     }
   },
 
   playChapter: (book, chapters, chapter, resumePosition) => {
-    const newState: Partial<PlayerState> = { 
-      currentBook: book, 
-      chapters, 
-      currentChapter: chapter, 
-      isPlaying: true, 
-      currentTime: resumePosition !== undefined ? resumePosition : ((chapter as any).progress_position || 0)
+    const newState: Partial<PlayerState> = {
+      currentBook: book,
+      chapters,
+      currentChapter: chapter,
+      isPlaying: true,
+      currentTime: resumePosition ?? ((chapter as any).progress_position || 0)
     };
-
+    
     if (book.theme_color) {
       newState.themeColor = book.theme_color;
-    } else {
-      newState.themeColor = '#F2EDE4'; // Reset to default
     }
 
     set(newState);
-  },
+  }
 }));

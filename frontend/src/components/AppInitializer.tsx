@@ -17,9 +17,13 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
 
   // Check if running in Electron
   const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI;
+  const hasInitialized = React.useRef(false);
 
   useEffect(() => {
+    if (hasInitialized.current) return;
+    
     const initializeApp = async () => {
+      hasInitialized.current = true;
       // Only run auto-login logic in Electron environment
       // For Web environment, we rely on the persisted token in authStore (handled by zustand persist logic)
       if (!isElectron) {
