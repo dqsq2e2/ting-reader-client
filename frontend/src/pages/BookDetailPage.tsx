@@ -429,14 +429,22 @@ const BookDetailPage: React.FC = () => {
   };
 
   const handleSelectAll = () => {
-    // Check if all VISIBLE chapters are selected (based on currentChapters which respects tabs)
-    const allSelected = currentChapters.every(c => selectedChapters.has(c.id));
+    // Only select chapters in the CURRENT GROUP (page)
+    const currentGroupChapters = groups[currentGroupIndex]?.chapters || [];
+    if (currentGroupChapters.length === 0) return;
+
+    // Check if all VISIBLE chapters are selected
+    const allSelected = currentGroupChapters.every(c => selectedChapters.has(c.id));
     
     if (allSelected) {
-      setSelectedChapters(new Set());
-    } else {
+      // Unselect only current group chapters
       const newSelected = new Set(selectedChapters);
-      currentChapters.forEach(c => newSelected.add(c.id));
+      currentGroupChapters.forEach(c => newSelected.delete(c.id));
+      setSelectedChapters(newSelected);
+    } else {
+      // Select all current group chapters
+      const newSelected = new Set(selectedChapters);
+      currentGroupChapters.forEach(c => newSelected.add(c.id));
       setSelectedChapters(newSelected);
     }
   };

@@ -1009,7 +1009,40 @@ const Player: React.FC = () => {
             </div>
             <div className="flex items-center gap-0.5 sm:gap-1">
               <button 
-                onClick={() => setShowChapters(true)}
+                onClick={() => {
+                  // Calculate group index for current chapter
+                  if (currentChapter && chapters.length > 0) {
+                    const index = chapters.findIndex(c => c.id === currentChapter.id);
+                    if (index !== -1) {
+                      const groupIndex = Math.floor(index / chaptersPerGroup);
+                      setCurrentGroupIndex(groupIndex);
+                      
+                      // Auto scroll to current chapter and group tab
+                      setTimeout(() => {
+                        // 1. Scroll to chapter
+                        const chapterEl = document.getElementById(`player-chapter-${currentChapter.id}`);
+                        if (chapterEl) {
+                          chapterEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                        }
+
+                        // 2. Scroll group tab into view
+                        const groupTab = document.getElementById(`player-group-tab-${groupIndex}`);
+                        const container = scrollRef.current;
+                        if (groupTab && container) {
+                          const containerWidth = container.offsetWidth;
+                          const tabWidth = groupTab.offsetWidth;
+                          const tabLeft = groupTab.offsetLeft;
+                          
+                          container.scrollTo({
+                            left: tabLeft - containerWidth / 2 + tabWidth / 2,
+                            behavior: 'smooth'
+                          });
+                        }
+                      }, 100);
+                    }
+                  }
+                  setShowChapters(true);
+                }}
                 className="p-1.5 sm:p-2 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 rounded-full transition-colors"
                 title="章节列表"
               >
@@ -1310,6 +1343,7 @@ const Player: React.FC = () => {
                       {groups.map((group, index) => (
                         <button
                           key={index}
+                          id={`player-group-tab-${index}`}
                           onClick={() => setCurrentGroupIndex(index)}
                           className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border shrink-0 snap-start ${
                             currentGroupIndex === index
