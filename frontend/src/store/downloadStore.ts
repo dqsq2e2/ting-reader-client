@@ -12,6 +12,7 @@ export interface DownloadTask {
   themeColor?: string;
   chapterId: string;
   title: string;
+  chapterNum?: number;
   status: 'pending' | 'downloading' | 'completed' | 'failed';
   progress: number;
   error?: string;

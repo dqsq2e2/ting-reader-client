@@ -467,7 +467,8 @@ const BookDetailPage: React.FC = () => {
         coverUrl: book!.cover_url,
         themeColor: book!.theme_color,
         chapterId: c.id,
-        title: c.title
+        title: c.title,
+        chapterNum: c.chapter_index
       });
     });
     setIsBatchMode(false);
@@ -852,7 +853,8 @@ const BookDetailPage: React.FC = () => {
                           coverUrl: book!.cover_url,
                           themeColor: book!.theme_color,
                           chapterId: chapter.id,
-                          title: chapter.title
+                          title: chapter.title,
+                          chapterNum: chapter.chapter_index || (actualIndex + 1)
                         });
                       }}
                       className="p-1.5 sm:p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-full transition-all"

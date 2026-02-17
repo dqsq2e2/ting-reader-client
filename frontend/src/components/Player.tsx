@@ -411,7 +411,8 @@ const Player: React.FC = () => {
                   bookTitle: currentBook.title,
                   coverUrl: currentBook.cover_url,
                   chapterId: nextChapter.id,
-                  title: nextChapter.title
+                  title: nextChapter.title,
+                  chapterNum: nextChapter.chapter_index
               });
            }
         }
@@ -1449,7 +1450,8 @@ const Player: React.FC = () => {
                                   bookTitle: currentBook!.title,
                                   coverUrl: currentBook!.cover_url,
                                   chapterId: chapter.id,
-                                  title: chapter.title
+                                  title: chapter.title,
+                                  chapterNum: chapter.chapter_index || (actualIndex + 1)
                                 });
                               }}
                               className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-full transition-all"
