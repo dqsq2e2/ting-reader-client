@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDownloadStore } from '../store/downloadStore';
 import { useAuthStore } from '../store/authStore';
-import { Trash2, CheckCircle2, Loader2, AlertCircle, Download, ChevronDown, ChevronRight, HardDrive, LogIn } from 'lucide-react';
+import { Trash2, CheckCircle2, Loader2, AlertCircle, Download, ChevronDown, ChevronRight, HardDrive, LogIn, Play, Pause } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
 import { getCoverUrl } from '../utils/image';
@@ -11,7 +11,7 @@ import { Play } from 'lucide-react';
 
 const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = false }) => {
   const navigate = useNavigate();
-  const { tasks, removeTask } = useDownloadStore();
+  const { tasks, removeTask, isPaused, pauseQueue, resumeQueue } = useDownloadStore();
   const { isAuthenticated } = useAuthStore();
   const { playChapter } = usePlayerStore();
   const [activeTab, setActiveTab] = useState<'all' | 'downloading' | 'completed'>('all');
@@ -279,6 +279,21 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
             </p>
         </div>
         <div className="flex gap-2">
+            {/* Pause/Resume Button */}
+            {tasks.some(t => t.status === 'downloading' || t.status === 'pending') && (
+                <button 
+                    onClick={isPaused ? resumeQueue : pauseQueue}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors font-medium text-sm ${
+                        !isPaused 
+                            ? 'bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/30'
+                            : 'bg-green-50 text-green-600 hover:bg-green-100 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30'
+                    }`}
+                >
+                    {!isPaused ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+                    {!isPaused ? '暂停' : '继续'}
+                </button>
+            )}
+
             {selectedTasks.size > 0 && (
                 <button 
                     onClick={handleBatchDelete} 

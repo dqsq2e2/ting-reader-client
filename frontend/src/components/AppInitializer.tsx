@@ -8,19 +8,18 @@ interface AppInitializerProps {
   children: React.ReactNode;
 }
 
-const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [statusMessage, setStatusMessage] = useState('正在启动...');
-  const { setAuth, setActiveUrl, setServerUrl } = useAuthStore();
-  const navigate = useNavigate();
-  const location = useLocation();
+import { useDownloadStore } from '../store/downloadStore';
 
-  // Check if running in Electron
-  const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI;
-  const hasInitialized = React.useRef(false);
+// ... existing code ...
+
+const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
+  // ... existing code ...
 
   useEffect(() => {
     if (hasInitialized.current) return;
+    
+    // Initialize download queue
+    useDownloadStore.getState().initializeQueue();
     
     const initializeApp = async () => {
       hasInitialized.current = true;
