@@ -7,7 +7,6 @@ import apiClient from '../api/client';
 import { getCoverUrl } from '../utils/image';
 
 import { usePlayerStore } from '../store/playerStore';
-import { Play } from 'lucide-react';
 
 const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = false }) => {
   const navigate = useNavigate();
