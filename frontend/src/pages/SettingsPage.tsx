@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import apiClient from '../api/client';
 import { useTheme } from '../hooks/useTheme';
 import { usePlayerStore } from '../store/playerStore';
@@ -9,12 +9,10 @@ import {
   Monitor, 
   Zap, 
   FastForward, 
-  Timer,
   CheckCircle2,
   User,
   Key,
   Code,
-  ExternalLink,
   Copy,
   Download,
   ChevronRight
@@ -23,21 +21,43 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useDownloadStore } from '../store/downloadStore';
 
+type ElectronApi = {
+  getCacheSize: () => Promise<number>;
+  clearCache: () => Promise<void>;
+};
+
+type SettingsPayload = {
+  playback_speed: number;
+  sleep_timer_default: number;
+  auto_preload: boolean;
+  auto_cache: boolean;
+  client_auto_download: boolean;
+  theme: 'light' | 'dark' | 'system';
+  widget_css: string;
+};
+
+type AccountUpdatePayload = {
+  username?: string;
+  password?: string;
+};
+
+const defaultSettings: SettingsPayload = {
+  playback_speed: 1.0,
+  sleep_timer_default: 0,
+  auto_preload: false,
+  auto_cache: false,
+  client_auto_download: false,
+  theme: 'system',
+  widget_css: ''
+};
+
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, setUser } = useAuthStore();
   const { applyTheme } = useTheme();
   const setPlaybackSpeed = usePlayerStore(state => state.setPlaybackSpeed);
   const setClientAutoDownload = usePlayerStore(state => state.setClientAutoDownload);
-  const [settings, setSettings] = useState({
-    playback_speed: 1.0,
-    sleep_timer_default: 0,
-    auto_preload: false,
-    auto_cache: false,
-    client_auto_download: false,
-    theme: 'system' as 'light' | 'dark' | 'system',
-    widget_css: ''
-  });
+  const [settings, setSettings] = useState<SettingsPayload>(defaultSettings);
   const [accountData, setAccountData] = useState({
     username: user?.username || '',
     password: ''
@@ -49,45 +69,42 @@ const SettingsPage: React.FC = () => {
   
   // Cache stats for Electron
   const [cacheSize, setCacheSize] = useState<number | null>(null);
-  const isElectron = !!(window as any).electronAPI;
+  const electronAPI = (window as Window & { electronAPI?: ElectronApi }).electronAPI;
+  const isElectron = !!electronAPI;
 
-  useEffect(() => {
-    fetchSettings();
-    if (isElectron) {
-      updateCacheStats();
-    }
-  }, []);
-
-  const updateCacheStats = async () => {
+  const updateCacheStats = useCallback(async () => {
     try {
-      const size = await (window as any).electronAPI.getCacheSize();
+      if (!electronAPI) return;
+      const size = await electronAPI.getCacheSize();
       setCacheSize(size);
     } catch (err) {
       console.error('Failed to get cache size', err);
     }
-  };
+  }, [electronAPI]);
 
   const handleClearCache = async () => {
     if (!confirm('确定要清空所有已下载的音频缓存吗？这将需要重新下载。')) return;
     try {
-      await (window as any).electronAPI.clearCache();
-      updateCacheStats();
+      if (!electronAPI) return;
+      await electronAPI.clearCache();
+      await updateCacheStats();
       // Also clear download store status
       useDownloadStore.getState().clearAllTasks();
       alert('缓存已清空');
-    } catch (err) {
+    } catch {
       alert('清空缓存失败');
     }
   };
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
-      const response = await apiClient.get('/api/settings');
-      const fetchedSettings = {
+      const response = await apiClient.get<Partial<SettingsPayload>>('/api/settings');
+      const fetchedSettings: SettingsPayload = {
+        ...defaultSettings,
         ...response.data,
-        auto_preload: !!response.data.auto_preload,
-        auto_cache: !!response.data.auto_cache,
-        client_auto_download: !!response.data.client_auto_download
+        auto_preload: !!response.data?.auto_preload,
+        auto_cache: !!response.data?.auto_cache,
+        client_auto_download: !!response.data?.client_auto_download
       };
       setSettings(fetchedSettings);
       // Ensure local theme matches server theme
@@ -99,9 +116,16 @@ const SettingsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [applyTheme]);
 
-  const handleSave = async (newSettings: any) => {
+  useEffect(() => {
+    fetchSettings();
+    if (isElectron) {
+      updateCacheStats();
+    }
+  }, [fetchSettings, isElectron, updateCacheStats]);
+
+  const handleSave = async (newSettings: SettingsPayload) => {
     try {
       await apiClient.post('/api/settings', newSettings);
       setSettings(newSettings);
@@ -123,7 +147,7 @@ const SettingsPage: React.FC = () => {
 
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (err) {
+    } catch {
       alert('保存失败');
     }
   };
@@ -131,7 +155,7 @@ const SettingsPage: React.FC = () => {
   const handleAccountUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const updateData: any = {};
+      const updateData: AccountUpdatePayload = {};
       if (accountData.username !== user?.username) {
         updateData.username = accountData.username;
       }
@@ -155,8 +179,9 @@ const SettingsPage: React.FC = () => {
       setAccountData({ ...accountData, password: '' });
       setAccountSaved(true);
       setTimeout(() => setAccountSaved(false), 2000);
-    } catch (err: any) {
-      alert(err.response?.data?.error || '更新失败');
+    } catch (err) {
+      const errorWithResponse = err as { response?: { data?: { error?: string } } };
+      alert(errorWithResponse.response?.data?.error || '更新失败');
     }
   };
 

@@ -8,11 +8,8 @@ import {
   Clock, 
   Loader2,
   Database,
-  Search,
-  Download,
-  Trash2
+  Search
 } from 'lucide-react';
-import { useDownloadStore } from '../store/downloadStore';
 
 interface Task {
   id: string;

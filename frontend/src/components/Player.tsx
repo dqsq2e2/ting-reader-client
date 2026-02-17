@@ -1,17 +1,15 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
 import apiClient from '../api/client';
 import { FastAverageColor } from 'fast-average-color';
+import type { Chapter } from '../types';
 import { 
   Play, 
   Pause, 
   SkipBack, 
   SkipForward, 
-  Volume2, 
-  VolumeX, 
-  FastForward, 
   ChevronUp,
   ChevronLeft,
   Maximize2,
@@ -28,7 +26,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
-import { setAlpha, toSolidColor } from '../utils/color';
+import { toSolidColor } from '../utils/color';
 import { useDownloadStore } from '../store/downloadStore';
 // getCachedFile is only for mobile, we use electronAPI.checkCached for desktop
 // import { getCachedFile } from '../utils/mobileCacheManager';
@@ -45,6 +43,12 @@ interface ProgressBarProps {
   onSeekStart: () => void;
   onSeekEnd: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
+
+type ElectronApi = {
+  checkCached: (ids: string[]) => Promise<Record<string, boolean>>;
+};
+
+const getElectronApi = () => (window as Window & { electronAPI?: ElectronApi }).electronAPI;
 
 const ProgressBar: React.FC<ProgressBarProps> = ({ 
   isMini = false,
@@ -127,14 +131,14 @@ const Player: React.FC = () => {
   const { token, activeUrl } = useAuthStore();
   const API_BASE_URL = activeUrl || import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://localhost:3000');
   
-  const getStreamUrl = (chapterId: string) => {
-    if ((window as any).electronAPI) {
+  const getStreamUrl = useCallback((chapterId: string) => {
+    if (getElectronApi()) {
       // Electron mode: use custom protocol for caching
       const remote = encodeURIComponent(API_BASE_URL);
       return `ting://stream/${chapterId}?token=${token || ''}&remote=${remote}`;
     }
     return `${API_BASE_URL}/api/stream/${chapterId}?token=${token}`;
-  };
+  }, [API_BASE_URL, token]);
 
   const { 
     currentBook, 
@@ -150,19 +154,18 @@ const Player: React.FC = () => {
     playbackSpeed,
     setPlaybackSpeed,
     volume,
-    setVolume,
     themeColor,
     setThemeColor,
     playChapter,
     setIsPlaying,
+    isExpanded,
+    setIsExpanded,
     clientAutoDownload,
     setClientAutoDownload
   } = usePlayerStore();
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const location = useLocation();
-  const [isMuted, setIsMuted] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
   const [showSleepTimer, setShowSleepTimer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -178,14 +181,14 @@ const Player: React.FC = () => {
       });
     }
   };
-  const [chapters, setChapters] = useState<any[]>([]);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
   const [customMinutes, setCustomMinutes] = useState('');
   const [editSkipIntro, setEditSkipIntro] = useState(0);
   const [editSkipOutro, setEditSkipOutro] = useState(0);
 
   const [cachedChapters, setCachedChapters] = useState<Set<string>>(new Set());
   const { addTask, tasks: downloadTasks } = useDownloadStore();
-  const isElectron = !!(window as any).electronAPI;
+  const isElectron = !!getElectronApi();
 
   // Use stored theme color from book to avoid flash
   useEffect(() => {
@@ -202,23 +205,59 @@ const Player: React.FC = () => {
           // Ignore errors
         });
     }
-  }, [currentBook?.id, currentBook?.theme_color, currentBook?.cover_url]);
+  }, [currentBook?.id, currentBook?.theme_color, currentBook?.cover_url, currentBook?.library_id, setThemeColor]);
+
+  const getOfflineSkipSettings = (bookId: string) => {
+    try {
+      const raw = localStorage.getItem(`offline_skip_${bookId}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const saveOfflineSkipSettings = (bookId: string, skipIntro: number, skipOutro: number) => {
+    localStorage.setItem(`offline_skip_${bookId}`, JSON.stringify({ skip_intro: skipIntro, skip_outro: skipOutro }));
+  };
+
+  const isOfflineMode = !navigator.onLine || window.location.hash.includes('/offline');
 
   useEffect(() => {
-    if (currentBook) {
-      setEditSkipIntro(currentBook.skip_intro || 0);
-      setEditSkipOutro(currentBook.skip_outro || 0);
+    if (!currentBook) return;
+    if (isOfflineMode) {
+      const cached = getOfflineSkipSettings(currentBook.id);
+      const skipIntro = cached?.skip_intro ?? currentBook.skip_intro ?? 0;
+      const skipOutro = cached?.skip_outro ?? currentBook.skip_outro ?? 0;
+      queueMicrotask(() => {
+        setEditSkipIntro(skipIntro);
+        setEditSkipOutro(skipOutro);
+      });
+      
+      // Prevent infinite loop: only update if values actually changed
+      if (currentBook.skip_intro !== skipIntro || currentBook.skip_outro !== skipOutro) {
+        usePlayerStore.setState(state => ({
+          currentBook: state.currentBook ? {
+            ...state.currentBook,
+            skip_intro: skipIntro,
+            skip_outro: skipOutro
+          } : null
+        }));
+      }
+    } else {
+      const skipIntro = currentBook.skip_intro ?? 0;
+      const skipOutro = currentBook.skip_outro ?? 0;
+      queueMicrotask(() => {
+        setEditSkipIntro(skipIntro);
+        setEditSkipOutro(skipOutro);
+      });
+      saveOfflineSkipSettings(currentBook.id, skipIntro, skipOutro);
     }
-  }, [currentBook?.id]);
+  }, [currentBook, isOfflineMode]);
 
   const handleSaveSettings = async () => {
     if (!currentBook) return;
-    try {
-      await apiClient.patch(`/api/books/${currentBook.id}`, {
-        skip_intro: editSkipIntro,
-        skip_outro: editSkipOutro
-      });
-      // Update local store state if necessary, but currentBook is in store
+    if (isOfflineMode) {
+      saveOfflineSkipSettings(currentBook.id, editSkipIntro, editSkipOutro);
       usePlayerStore.setState(state => ({
         currentBook: state.currentBook ? {
           ...state.currentBook,
@@ -226,6 +265,22 @@ const Player: React.FC = () => {
           skip_outro: editSkipOutro
         } : null
       }));
+      setShowSettings(false);
+      return;
+    }
+    try {
+      await apiClient.patch(`/api/books/${currentBook.id}`, {
+        skip_intro: editSkipIntro,
+        skip_outro: editSkipOutro
+      });
+      usePlayerStore.setState(state => ({
+        currentBook: state.currentBook ? {
+          ...state.currentBook,
+          skip_intro: editSkipIntro,
+          skip_outro: editSkipOutro
+        } : null
+      }));
+      saveOfflineSkipSettings(currentBook.id, editSkipIntro, editSkipOutro);
       setShowSettings(false);
     } catch (err) {
       console.error('Failed to save settings', err);
@@ -248,7 +303,6 @@ const Player: React.FC = () => {
 
   const [sleepTimer, setSleepTimer] = useState<number | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timerMenuRef = useRef<HTMLDivElement>(null);
 
   const [error, setError] = useState<string | null>(null);
@@ -267,7 +321,7 @@ const Player: React.FC = () => {
       setAutoCache(!!res.data.auto_cache);
       setClientAutoDownload(!!res.data.client_auto_download);
     }).catch(err => console.error('Failed to fetch settings', err));
-  }, []);
+  }, [setClientAutoDownload]);
 
   // Fetch chapters for the current book
   useEffect(() => {
@@ -280,6 +334,27 @@ const Player: React.FC = () => {
     }
   }, [currentBook?.id]);
 
+  useEffect(() => {
+    if (!currentBook?.id) return;
+    if (!isOfflineMode) return;
+    const completedTasks = downloadTasks.filter(t => t.bookId === currentBook.id && t.status === 'completed');
+    const sorted = [...completedTasks].sort((a, b) => {
+      if (a.chapterNum && b.chapterNum) return a.chapterNum - b.chapterNum;
+      return (a.title || '').localeCompare(b.title || '');
+    });
+    const offlineChapters = sorted.map((task, index) => ({
+      id: task.chapterId,
+      title: task.title,
+      book_id: task.bookId,
+      chapter_index: task.chapterNum ?? index + 1,
+      duration: task.duration || 0
+    }));
+    queueMicrotask(() => {
+      setChapters(offlineChapters);
+      setCurrentGroupIndex(0);
+    });
+  }, [currentBook?.id, downloadTasks, isOfflineMode]);
+
   // Check cache status
   useEffect(() => {
     const checkCache = async () => {
@@ -288,9 +363,10 @@ const Player: React.FC = () => {
       const ids = chapters.map(c => `${c.id}.mp3`);
       const newCached = new Set<string>();
 
-      if (isElectron) {
+      const electronAPI = getElectronApi();
+      if (electronAPI) {
         try {
-          const result = await (window as any).electronAPI.checkCached(ids);
+          const result = await electronAPI.checkCached(ids);
           Object.entries(result).forEach(([file, exists]) => {
             if (exists) newCached.add(file.replace('.mp3', ''));
           });
@@ -329,8 +405,10 @@ const Player: React.FC = () => {
   // Reset initial load ref when chapter changes
   useEffect(() => {
     isInitialLoadRef.current = true;
-    setBufferedTime(0);
-    setRetryCount(0);
+    queueMicrotask(() => {
+      setBufferedTime(0);
+      setRetryCount(0);
+    });
   }, [currentChapter?.id]);
 
   // Reset initial load ref when retrying (to allow resume logic to run again)
@@ -343,7 +421,6 @@ const Player: React.FC = () => {
   // Sync state with audio element
   useEffect(() => {
     if (!audioRef.current || !currentChapter) return;
-    setError(null); // Clear error on source change
     
     if (isPlaying) {
       const playPromise = audioRef.current.play();
@@ -361,16 +438,16 @@ const Player: React.FC = () => {
     } else {
       audioRef.current.pause();
     }
-  }, [isPlaying, currentChapter?.id, retryCount]);
+  }, [isPlaying, currentChapter, retryCount]);
 
   // Preload and Server-side Cache next chapter logic
   useEffect(() => {
     if ((!autoPreload && !autoCache && !clientAutoDownload) || !currentChapter || !currentBook) return;
     
     // Find next chapter index
-    apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
+    apiClient.get<Chapter[]>(`/api/books/${currentBook.id}/chapters`).then(res => {
       const chapters = res.data;
-      const currentIndex = chapters.findIndex((c: any) => c.id === currentChapter.id);
+      const currentIndex = chapters.findIndex((chapter) => chapter.id === currentChapter.id);
       if (currentIndex !== -1 && currentIndex < chapters.length - 1) {
         const nextChapter = chapters[currentIndex + 1];
         
@@ -418,7 +495,7 @@ const Player: React.FC = () => {
         }
       }
     }).catch(err => console.error('Preload failed', err));
-  }, [currentChapter?.id, autoPreload, autoCache, clientAutoDownload, currentBook?.id, isElectron]);
+  }, [currentChapter, autoPreload, autoCache, clientAutoDownload, currentBook, getStreamUrl, isElectron]);
 
   // Handle Skip Intro and Outro
   const handleTimeUpdate = () => {
@@ -504,29 +581,30 @@ const Player: React.FC = () => {
     }
   };
 
+  const isPlayingRef = useRef(isPlaying);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
   // Handle Sleep Timer Countdown
   useEffect(() => {
     if (sleepTimer === null || sleepTimer <= 0 || !isPlaying) return;
 
     const interval = setInterval(() => {
       setSleepTimer(prev => {
-        if (prev === null || prev <= 1) return 0;
+        if (prev === null) return prev;
+        if (prev <= 1) {
+          if (isPlayingRef.current) {
+            togglePlay();
+          }
+          return null;
+        }
         return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [sleepTimer === null, isPlaying]);
-
-  // Handle Sleep Timer Expiration
-  useEffect(() => {
-    if (sleepTimer === 0) {
-      if (isPlaying) {
-        togglePlay();
-      }
-      setSleepTimer(null);
-    }
-  }, [sleepTimer, isPlaying]);
+  }, [sleepTimer, isPlaying, togglePlay]);
 
   useEffect(() => {
     if (!audioRef.current) return;
@@ -535,8 +613,8 @@ const Player: React.FC = () => {
 
   useEffect(() => {
     if (!audioRef.current) return;
-    audioRef.current.volume = isMuted ? 0 : volume;
-  }, [volume, isMuted]);
+    audioRef.current.volume = volume;
+  }, [volume]);
 
   const currentTimeRef = useRef(0);
   useEffect(() => {
@@ -567,7 +645,7 @@ const Player: React.FC = () => {
     return () => {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     };
-  }, [isPlaying, currentBook?.id, currentChapter?.id]);
+  }, [isPlaying, currentBook, currentChapter]);
 
   const handleLoadedMetadata = () => {
     if (audioRef.current) {
@@ -635,7 +713,7 @@ const Player: React.FC = () => {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const getChapterProgressText = (chapter: any) => {
+  const getChapterProgressText = (chapter: Chapter) => {
     if (!chapter.progress_position || !chapter.duration) return null;
     
     const percent = Math.floor((chapter.progress_position / chapter.duration) * 100);
@@ -653,7 +731,7 @@ const Player: React.FC = () => {
     if (isHiddenPage && isExpanded) {
       setIsExpanded(false);
     }
-  }, [location.pathname, isExpanded, isHiddenPage]);
+  }, [location.pathname, isExpanded, isHiddenPage, setIsExpanded]);
 
   // Fullscreen Logic for Widget
   const toggleFullscreen = async () => {
@@ -702,7 +780,7 @@ const Player: React.FC = () => {
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [isWidgetMode]);
+  }, [isWidgetMode, setIsExpanded]);
 
   if (!currentChapter) return null;
 
@@ -744,9 +822,15 @@ const Player: React.FC = () => {
         crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
         onProgress={handleProgress}
-        onLoadedMetadata={handleLoadedMetadata}
+        onLoadedMetadata={() => {
+          setError(null);
+          handleLoadedMetadata();
+        }}
         onEnded={handleEnded}
-        onPlay={() => setIsPlaying(true)}
+        onPlay={() => {
+          setError(null);
+          setIsPlaying(true);
+        }}
         onPause={() => setIsPlaying(false)}
         onError={(e) => {
           const audio = audioRef.current;

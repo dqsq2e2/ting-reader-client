@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import apiClient from '../api/client';
 import type { Book, Library } from '../types';
 import BookCard from '../components/BookCard';
@@ -94,7 +94,7 @@ const SearchPage: React.FC = () => {
 
       setLoading(true);
       try {
-        const params: any = {};
+        const params: Record<string, string> = {};
         if (debouncedQuery.trim()) params.search = debouncedQuery;
         if (selectedTag) params.tag = selectedTag;
         if (selectedLibraryId) params.library_id = selectedLibraryId;
@@ -139,19 +139,19 @@ const SearchPage: React.FC = () => {
     const [canScrollLeft, setCanScrollLeft] = useState(false);
     const [canScrollRight, setCanScrollRight] = useState(false);
 
-    const checkScroll = () => {
+    const checkScroll = useCallback(() => {
       if (scrollRef.current) {
         const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
         setCanScrollLeft(scrollLeft > 0);
         setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 1); // -1 buffer
       }
-    };
+    }, [scrollRef]);
 
     useEffect(() => {
       checkScroll();
       window.addEventListener('resize', checkScroll);
       return () => window.removeEventListener('resize', checkScroll);
-    }, [items]);
+    }, [items, checkScroll]);
 
     if (items.length === 0) return null;
 

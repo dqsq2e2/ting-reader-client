@@ -1,11 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import type { AxiosError } from 'axios';
 import apiClient from '../api/client';
 import Player from '../components/Player';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
 import { Search, ArrowLeft, User, Lock, LogIn } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
+import type { Book, Chapter } from '../types';
+
+type ProgressResponse = {
+  chapter_id?: string | null;
+};
 
 const WidgetPage: React.FC = () => {
   const { id } = useParams();
@@ -14,7 +20,7 @@ const WidgetPage: React.FC = () => {
   const { setToken, setAuth, isAuthenticated } = useAuthStore();
   const { playChapter } = usePlayerStore();
   
-  const [books, setBooks] = useState<any[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [showBookList, setShowBookList] = useState(!id);
@@ -47,7 +53,7 @@ const WidgetPage: React.FC = () => {
   // Load widget CSS from settings
   useEffect(() => {
     if (isAuthenticated) {
-      apiClient.get('/api/settings').then(res => {
+      apiClient.get<{ widget_css?: string }>('/api/settings').then(res => {
         if (res.data.widget_css) {
           const styleId = 'widget-custom-css';
           let style = document.getElementById(styleId) as HTMLStyleElement;
@@ -68,7 +74,7 @@ const WidgetPage: React.FC = () => {
     
     const fetchBooks = async () => {
       try {
-        const res = await apiClient.get('/api/books', { params: { search: searchQuery } });
+        const res = await apiClient.get<Book[]>('/api/books', { params: { search: searchQuery } });
         setBooks(res.data);
       } catch (err) {
         console.error('Failed to fetch books', err);
@@ -84,22 +90,22 @@ const WidgetPage: React.FC = () => {
     if (id && isAuthenticated) {
       const loadBook = async () => {
         try {
-          const res = await apiClient.get(`/api/books/${id}`);
+          const res = await apiClient.get<Book>(`/api/books/${id}`);
           const book = res.data;
-          const chaptersRes = await apiClient.get(`/api/books/${id}/chapters`);
+          const chaptersRes = await apiClient.get<Chapter[]>(`/api/books/${id}/chapters`);
           const chapters = chaptersRes.data;
           
-          let progress = { chapter_id: '' };
+          let progress: ProgressResponse = {};
           try {
-             const progressRes = await apiClient.get(`/api/progress/${id}`);
+             const progressRes = await apiClient.get<ProgressResponse>(`/api/progress/${id}`);
              progress = progressRes.data;
-          } catch (e) {
+          } catch {
             // Ignore progress fetch error, maybe new book
           }
           
           let targetChapter = chapters[0];
           if (progress?.chapter_id) {
-            targetChapter = chapters.find((c: any) => c.id === progress.chapter_id) || chapters[0];
+            targetChapter = chapters.find((c) => c.id === progress.chapter_id) || chapters[0];
           }
           
           playChapter(book, chapters, targetChapter);
@@ -110,7 +116,7 @@ const WidgetPage: React.FC = () => {
       };
       loadBook();
     }
-  }, [id, isAuthenticated]);
+  }, [id, isAuthenticated, playChapter]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,8 +128,9 @@ const WidgetPage: React.FC = () => {
       const { token, user } = response.data;
       setAuth(user, token);
       // Login successful, state updates will trigger re-renders
-    } catch (err: any) {
-      setLoginError(err.response?.data?.error || '登录失败');
+    } catch (err) {
+      const error = err as AxiosError<{ error?: string }>;
+      setLoginError(error.response?.data?.error || '登录失败');
     } finally {
       setIsLoggingIn(false);
     }

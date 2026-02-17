@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { Loader2 } from 'lucide-react';
 import logoImg from '../assets/logo.png';
+
+type WindowWithElectron = {
+  electronAPI?: unknown;
+};
 
 interface AppInitializerProps {
   children: React.ReactNode;
@@ -13,7 +17,13 @@ import { useDownloadStore } from '../store/downloadStore';
 // ... existing code ...
 
 const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
-  // ... existing code ...
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [statusMessage, setStatusMessage] = useState('正在启动...');
+  const { setAuth, setActiveUrl, setServerUrl } = useAuthStore();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const hasInitialized = useRef(false);
+  const isElectron = typeof window !== 'undefined' && !!(window as WindowWithElectron).electronAPI;
 
   useEffect(() => {
     if (hasInitialized.current) return;

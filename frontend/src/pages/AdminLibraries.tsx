@@ -99,7 +99,7 @@ const AdminLibraries: React.FC = () => {
       if (savedLibId) {
         handleScan(savedLibId, true);
       }
-    } catch (err) {
+    } catch {
       alert(editingId ? '修改失败，请检查配置' : '添加失败，请检查配置');
     }
   };
@@ -111,7 +111,7 @@ const AdminLibraries: React.FC = () => {
       if (!silent) {
         alert('扫描任务已启动');
       }
-    } catch (err) {
+    } catch {
       if (!silent) {
         alert('扫描启动失败');
       }
@@ -125,7 +125,7 @@ const AdminLibraries: React.FC = () => {
       await apiClient.delete(`/api/libraries/${id}`);
       setDeleteConfirmId(null);
       fetchLibraries();
-    } catch (err) {
+    } catch {
       alert('删除失败');
     }
   };

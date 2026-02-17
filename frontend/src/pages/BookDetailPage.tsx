@@ -7,7 +7,6 @@ import { usePlayerStore } from '../store/playerStore';
 import { 
   Play, 
   Heart, 
-  Share2, 
   ChevronLeft, 
   ChevronDown, 
   ChevronUp, 
@@ -33,6 +32,18 @@ import { useDownloadStore } from '../store/downloadStore';
 // import { getCachedFile } from '../utils/mobileCacheManager';
 import ExpandableTitle from '../components/ExpandableTitle';
 import { setAlpha, toSolidColor } from '../utils/color';
+
+type ElectronApi = {
+  checkCached: (ids: string[]) => Promise<Record<string, boolean>>;
+};
+
+const getElectronApi = () => (window as Window & { electronAPI?: ElectronApi }).electronAPI;
+
+type ChapterProgressMeta = {
+  progress_updated_at?: string;
+};
+
+const getProgressUpdatedAt = (chapter: Chapter) => (chapter as Chapter & ChapterProgressMeta).progress_updated_at;
 
 const BookDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -73,7 +84,7 @@ const BookDetailPage: React.FC = () => {
     if (currentChapter?.book_id === book?.id) {
       setHighlightedChapterId(null);
     }
-  }, [currentChapter?.id, book?.id]);
+  }, [currentChapter?.id, currentChapter?.book_id, book?.id]);
   
   const [cachedChapters, setCachedChapters] = useState<Set<string>>(new Set());
   const { addTask, tasks: downloadTasks } = useDownloadStore();
@@ -81,7 +92,7 @@ const BookDetailPage: React.FC = () => {
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedChapters, setSelectedChapters] = useState<Set<string>>(new Set());
 
-  const isElectron = !!(window as any).electronAPI;
+  const isElectron = !!getElectronApi();
 
   // Check cache status
   useEffect(() => {
@@ -91,9 +102,10 @@ const BookDetailPage: React.FC = () => {
       const ids = chapters.map(c => `${c.id}.mp3`);
       const newCached = new Set<string>();
 
-      if (isElectron) {
+      const electronAPI = getElectronApi();
+      if (electronAPI) {
         try {
-          const result = await (window as any).electronAPI.checkCached(ids);
+          const result = await electronAPI.checkCached(ids);
           Object.entries(result).forEach(([file, exists]) => {
             if (exists) newCached.add(file.replace('.mp3', ''));
           });
@@ -132,7 +144,7 @@ const BookDetailPage: React.FC = () => {
         // If tasks are empty (e.g. cleared in Settings), re-check cache to ensure UI is in sync
         checkCache();
     }
-  }, [chapters, downloadTasks, book?.id]);
+  }, [chapters, downloadTasks, book?.id, cachedChapters.size, isElectron]);
 
   const scrollGroups = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
@@ -253,10 +265,10 @@ const BookDetailPage: React.FC = () => {
       } 
       // 2. Fallback: Most recently played chapter from history
       else {
-        const playedChapters = [...chapters].filter(c => (c as any).progress_updated_at);
+        const playedChapters = [...chapters].filter(c => !!getProgressUpdatedAt(c));
         if (playedChapters.length > 0) {
           playedChapters.sort((a, b) => {
-            return new Date((b as any).progress_updated_at).getTime() - new Date((a as any).progress_updated_at).getTime();
+            return new Date(getProgressUpdatedAt(b) || 0).getTime() - new Date(getProgressUpdatedAt(a) || 0).getTime();
           });
           targetChapter = playedChapters[0];
         }
@@ -321,7 +333,7 @@ const BookDetailPage: React.FC = () => {
         }
       }
     }
-  }, [book?.id, currentChapter?.id, chapters, mainChapters, extraChapters, activeTab, currentGroupIndex, currentChapters, chaptersPerGroup]);
+  }, [book, id, currentChapter, chapters, mainChapters, extraChapters, activeTab, currentGroupIndex, currentChapters, chaptersPerGroup]);
 
   const toggleFavorite = async () => {
     try {
@@ -347,7 +359,7 @@ const BookDetailPage: React.FC = () => {
       await apiClient.patch(`/api/books/${id}`, dataToSave);
       setBook({ ...book!, ...dataToSave });
       setIsEditModalOpen(false);
-    } catch (err) {
+    } catch {
       alert('保存失败');
     }
   };
@@ -364,7 +376,7 @@ const BookDetailPage: React.FC = () => {
         description: response.data.description,
         tags: response.data.tags
       });
-    } catch (err) {
+    } catch {
       alert('刮削失败');
     } finally {
       setScraping(false);
@@ -406,7 +418,7 @@ const BookDetailPage: React.FC = () => {
     return `已播${percent}%`;
   };
 
-  const getTitleFontSize = (title: string) => {
+  const getTitleFontSize = () => {
     // Responsive font size: subtle scaling from mobile to desktop
     return 'text-lg max-[370px]:text-base sm:text-2xl md:text-3xl';
   };
@@ -528,7 +540,7 @@ const BookDetailPage: React.FC = () => {
             <div className="space-y-3 min-w-0">
               <ExpandableTitle 
                 title={book.title} 
-                className={`font-bold text-slate-900 dark:text-white leading-tight transition-all duration-300 ${getTitleFontSize(book.title || '')}`}
+                className={`font-bold text-slate-900 dark:text-white leading-tight transition-all duration-300 ${getTitleFontSize()}`}
                 maxLines={2}
               />
               <div className="flex flex-wrap justify-center md:justify-start gap-x-4 gap-y-2 mt-4 text-sm">
@@ -746,7 +758,6 @@ const BookDetailPage: React.FC = () => {
           {(groups[currentGroupIndex]?.chapters || currentChapters).map((chapter, index) => {
             const actualIndex = currentGroupIndex * chaptersPerGroup + index;
             const isCurrent = currentChapter?.id === chapter.id;
-            const isPlayingThisBook = currentChapter?.book_id === book?.id;
             // Active means playing OR highlighted
             const isActive = isCurrent || highlightedChapterId === chapter.id;
             
@@ -854,7 +865,8 @@ const BookDetailPage: React.FC = () => {
                           themeColor: book!.theme_color,
                           chapterId: chapter.id,
                           title: chapter.title,
-                          chapterNum: chapter.chapter_index || (actualIndex + 1)
+                          chapterNum: chapter.chapter_index || (actualIndex + 1),
+                          duration: chapter.duration
                         });
                       }}
                       className="p-1.5 sm:p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-full transition-all"

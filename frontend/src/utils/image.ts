@@ -1,3 +1,5 @@
+type WindowWithElectron = Window & { electronAPI?: unknown };
+
 export const getCoverUrl = (url?: string, libraryId?: string, bookId?: string) => {
   // Try to get dynamic base URL from storage first (for Electron), then env, then default
   const storageUrl = localStorage.getItem('active_url') || localStorage.getItem('server_url');
@@ -9,7 +11,7 @@ export const getCoverUrl = (url?: string, libraryId?: string, bookId?: string) =
   // For HTTP/HTTPS URLs:
   if (url.startsWith('http')) {
       // Electron: Use ting:// to support offline caching for remote images too
-      if ((window as any).electronAPI && bookId) {
+      if ((window as WindowWithElectron).electronAPI && bookId) {
          return `ting://cover/${bookId}?remote=${encodeURIComponent(url)}`;
       }
       return url;
@@ -28,7 +30,7 @@ export const getCoverUrl = (url?: string, libraryId?: string, bookId?: string) =
   }
 
   // Electron Environment: Use ting:// protocol to support offline caching
-  if ((window as any).electronAPI && bookId) {
+  if ((window as WindowWithElectron).electronAPI && bookId) {
       // If we are in Electron, we want to try the local cache first.
       // We use 'ting://cover/<bookId>?remote=<encoded_url>'
       // The backend will check local 'cover_<bookId>' file.

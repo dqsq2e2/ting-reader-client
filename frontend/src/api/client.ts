@@ -1,6 +1,12 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 
+type ElectronApi = {
+  resolveRedirect: (url: string) => Promise<string>;
+};
+
+const getElectronApi = () => (window as Window & { electronAPI?: ElectronApi }).electronAPI;
+
 // Initial base URL
 const API_BASE_URL = localStorage.getItem('active_url') || localStorage.getItem('server_url') || (import.meta.env.PROD ? '' : 'http://localhost:3000');
 
@@ -66,13 +72,14 @@ apiClient.interceptors.response.use(
 
     // Handle Network Error or Connection Refused (potentially redirect expired)
     // Only in Electron environment where we manage serverUrl/activeUrl
-    if (!error.response && !originalRequest._retry && (window as any).electronAPI) {
+    const electronAPI = getElectronApi();
+    if (!error.response && !originalRequest._retry && electronAPI) {
       // Check for offline mode FIRST
       if (!navigator.onLine) {
           return Promise.reject(error);
       }
       
-      const { serverUrl, activeUrl, setActiveUrl } = useAuthStore.getState();
+      const { serverUrl, setActiveUrl } = useAuthStore.getState();
 
       // If we have a serverUrl and it's different or we want to re-verify
       if (serverUrl) {
@@ -81,7 +88,7 @@ apiClient.interceptors.response.use(
         
         try {
            // Call Electron IPC to resolve again
-           const newUrl = await (window as any).electronAPI.resolveRedirect(serverUrl);
+           const newUrl = await electronAPI.resolveRedirect(serverUrl);
            
            // In main.js, resolve-redirect returns the URL string directly
            if (newUrl && typeof newUrl === 'string') {

@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { Lock, User, Server, Download } from 'lucide-react';
 import logoImg from '../assets/logo.png';
+
+type ErrorWithResponse = {
+  response?: {
+    data?: {
+      error?: string;
+    };
+  };
+};
 
 const LoginPage: React.FC = () => {
   const [serverAddress, setServerAddress] = useState('');
@@ -17,7 +24,7 @@ const LoginPage: React.FC = () => {
   const { setAuth, setServerUrl, setActiveUrl, serverUrl: storedServerUrl } = useAuthStore();
   
   // Check if running in Electron
-  const isElectron = !!(window as any).electronAPI;
+  const isElectron = !!(window as Window & { electronAPI?: unknown }).electronAPI;
 
   useEffect(() => {
     // Restore saved credentials if available
@@ -69,7 +76,7 @@ const LoginPage: React.FC = () => {
       // Attempt to probe the URL first to see if it redirects?
       // Or just fire POST and handle retry.
       
-      let fetchResponse = await fetch(loginUrl, {
+      const fetchResponse = await fetch(loginUrl, {
           method: 'POST',
           headers: {
               'Content-Type': 'application/json'
@@ -83,8 +90,8 @@ const LoginPage: React.FC = () => {
               console.log('Final effective URL:', fetchResponse.url);
               const baseUrl = fetchResponse.url.replace(/\/api\/auth\/login\/?$/, '');
               setActiveUrl(baseUrl);
-          } catch(e) {
-              console.error('Failed to parse final URL', e);
+          } catch (error) {
+              console.error('Failed to parse final URL', error);
           }
       }
 
@@ -142,9 +149,10 @@ const LoginPage: React.FC = () => {
 
       setAuth(user, token);
       navigate('/');
-    } catch (err: any) {
+    } catch (err) {
       console.error('Login error:', err);
-      setError(err.response?.data?.error || '登录失败，请检查用户名和密码');
+      const errorWithResponse = err as ErrorWithResponse;
+      setError(errorWithResponse.response?.data?.error || '登录失败，请检查用户名和密码');
     } finally {
       setLoading(false);
     }

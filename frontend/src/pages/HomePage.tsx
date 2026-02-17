@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
 import type { Stats, Progress } from '../types';
-import BookCard from '../components/BookCard';
 import { 
   Play, 
   Clock, 

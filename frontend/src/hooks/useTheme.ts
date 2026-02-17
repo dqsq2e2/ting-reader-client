@@ -9,28 +9,30 @@ export const useTheme = () => {
   });
 
   const applyTheme = (t: Theme) => {
-    const root = window.document.documentElement;
-    root.classList.remove('light', 'dark');
-
-    let effectiveTheme = t;
-    if (t === 'system') {
-      effectiveTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-
-    root.classList.add(effectiveTheme);
-    localStorage.setItem('theme', t);
     setTheme(t);
   };
 
   useEffect(() => {
-    // Initial apply
-    applyTheme(theme);
+    const root = window.document.documentElement;
+    const applyToDom = (t: Theme) => {
+      root.classList.remove('light', 'dark');
+
+      let effectiveTheme = t;
+      if (t === 'system') {
+        effectiveTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+
+      root.classList.add(effectiveTheme);
+    };
+
+    applyToDom(theme);
+    localStorage.setItem('theme', theme);
 
     // Listen for system theme changes if set to system
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => {
       if (theme === 'system') {
-        applyTheme('system');
+        applyToDom('system');
       }
     };
 
@@ -48,7 +50,7 @@ export const useTheme = () => {
       if (response.data.theme) {
         applyTheme(response.data.theme);
       }
-    } catch (err) {
+    } catch {
       // console.error('Failed to refresh theme from server', err);
     }
   };

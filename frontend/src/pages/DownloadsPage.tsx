@@ -1,23 +1,31 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useDownloadStore } from '../store/downloadStore';
-import { useAuthStore } from '../store/authStore';
-import { Trash2, CheckCircle2, Loader2, AlertCircle, Download, ChevronDown, ChevronRight, HardDrive, LogIn, Play, Pause } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Trash2, CheckCircle2, Loader2, AlertCircle, Download, ChevronDown, ChevronRight, Play } from 'lucide-react';
 import apiClient from '../api/client';
 import { getCoverUrl } from '../utils/image';
 
 import { usePlayerStore } from '../store/playerStore';
+import type { Book, Chapter } from '../types';
+import type { DownloadTask } from '../store/downloadStore';
+
+type ElectronApi = {
+  removeCachedFile: (fileName: string) => Promise<void>;
+};
+
+const getElectronApi = () => (window as Window & { electronAPI?: ElectronApi }).electronAPI;
 
 const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = false }) => {
-  const navigate = useNavigate();
-  const { tasks, removeTask, isPaused, pauseQueue, resumeQueue } = useDownloadStore();
-  const { isAuthenticated } = useAuthStore();
+  const { tasks, removeTask } = useDownloadStore();
   const { playChapter } = usePlayerStore();
   const [activeTab, setActiveTab] = useState<'all' | 'downloading' | 'completed'>('all');
   const [expandedBookId, setExpandedBookId] = useState<string | null>(null);
-  const isElectron = !!(window as any).electronAPI;
   
   const [fetchedBooks, setFetchedBooks] = useState<Record<string, { title: string, cover_url: string, library_id: string, theme_color?: string }>>({});
+  const tabs: Array<{ id: 'all' | 'downloading' | 'completed'; label: string }> = [
+    { id: 'all', label: '全部' },
+    { id: 'downloading', label: '进行中' },
+    { id: 'completed', label: '已完成' }
+  ];
   
 
   const filteredTasks = tasks.filter(task => {
@@ -60,6 +68,13 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
       tasks: data.tasks
     }));
   }, [filteredTasks]);
+
+  const groupTitleIsValid = useCallback((title?: string) => {
+      if (!title) return false;
+      if (title.startsWith('未知书籍')) return false;
+      if (title.startsWith('Book ')) return false; // Likely a UUID fallback
+      return true;
+  }, []);
 
   // Fetch missing book details
   useEffect(() => {
@@ -108,14 +123,7 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
     };
     
     fetchMissingDetails();
-  }, [bookGroups.length]); // Depend on list length to trigger check when new groups appear
-
-  const groupTitleIsValid = (title?: string) => {
-      if (!title) return false;
-      if (title.startsWith('未知书籍')) return false;
-      if (title.startsWith('Book ')) return false; // Likely a UUID fallback
-      return true;
-  };
+  }, [bookGroups, fetchedBooks, groupTitleIsValid, isOfflineMode]);
 
   const toggleExpand = (bookId: string) => {
     if (expandedBookId === bookId) {
@@ -130,8 +138,9 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
     if (confirm('确定要删除此下载记录吗？已下载的文件也将被删除。')) {
         removeTask(taskId);
         try {
-            if (isElectron) {
-                await (window as any).electronAPI.removeCachedFile(`${chapterId}.mp3`);
+            const electronAPI = getElectronApi();
+            if (electronAPI) {
+                await electronAPI.removeCachedFile(`${chapterId}.mp3`);
             }
         } catch (err) {
             console.error('Failed to remove file:', err);
@@ -152,8 +161,9 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
         for (const task of tasksToDelete) {
             removeTask(task.id);
             try {
-                if (isElectron) {
-                    await (window as any).electronAPI.removeCachedFile(`${task.chapterId}.mp3`);
+                const electronAPI = getElectronApi();
+                if (electronAPI) {
+                    await electronAPI.removeCachedFile(`${task.chapterId}.mp3`);
                 }
             } catch (err) {
                 console.error('Failed to remove file:', err);
@@ -213,8 +223,9 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
         if (task) {
           removeTask(taskId);
           try {
-            if (isElectron) {
-               await (window as any).electronAPI.removeCachedFile(`${task.chapterId}.mp3`);
+            const electronAPI = getElectronApi();
+            if (electronAPI) {
+               await electronAPI.removeCachedFile(`${task.chapterId}.mp3`);
             }
           } catch (err) {
              console.error('Failed to remove file:', err);
@@ -225,15 +236,27 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
     }
   };
 
-  const handlePlay = (task: typeof filteredTasks[0]) => {
+  const handlePlay = (task: DownloadTask) => {
+      const resolvedBookId = task.bookId || 'unknown';
       // Construct a minimal book object and chapter list to play
-      const fetchedInfo = fetchedBooks[task.bookId];
-      const book = {
-          id: task.bookId || 'unknown',
+      const fetchedInfo = fetchedBooks[resolvedBookId];
+      const book: Book = {
+          id: resolvedBookId,
           title: fetchedInfo?.title || task.bookTitle || '未知书籍',
           cover_url: fetchedInfo?.cover_url || task.coverUrl || '',
-          library_id: fetchedInfo?.library_id || 'default', // Fallback
-          theme_color: fetchedInfo?.theme_color || task.themeColor
+          library_id: fetchedInfo?.library_id || 'default',
+          theme_color: fetchedInfo?.theme_color || task.themeColor,
+          author: undefined,
+          narrator: undefined,
+          description: undefined,
+          path: '',
+          book_hash: '',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          library_type: undefined,
+          skip_intro: undefined,
+          skip_outro: undefined,
+          tags: undefined
       };
       
       // Filter all downloaded chapters for this book to create a playlist
@@ -246,23 +269,25 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
             return (a.title || '').localeCompare(b.title || '');
         });
 
-      const chapters = bookTasks.map(t => ({
+      const chapters: Chapter[] = bookTasks.map((t, index) => ({
           id: t.chapterId,
           title: t.title,
-          book_id: t.bookId,
-          chapter_index: 0, // Unknown
-          duration: 0
+          book_id: resolvedBookId,
+          chapter_index: t.chapterNum ?? index + 1,
+          duration: 0,
+          path: ''
       }));
 
-      const currentChapter = {
+      const currentChapter: Chapter = {
           id: task.chapterId,
           title: task.title,
-          book_id: task.bookId,
-          chapter_index: 0,
-          duration: 0
+          book_id: resolvedBookId,
+          chapter_index: task.chapterNum ?? 1,
+          duration: 0,
+          path: ''
       };
 
-      playChapter(book as any, chapters, currentChapter);
+      playChapter(book, chapters, currentChapter);
   };
 
   return (
@@ -278,21 +303,6 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
             </p>
         </div>
         <div className="flex gap-2">
-            {/* Pause/Resume Button */}
-            {tasks.some(t => t.status === 'downloading' || t.status === 'pending') && (
-                <button 
-                    onClick={isPaused ? resumeQueue : pauseQueue}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors font-medium text-sm ${
-                        !isPaused 
-                            ? 'bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/30'
-                            : 'bg-green-50 text-green-600 hover:bg-green-100 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30'
-                    }`}
-                >
-                    {!isPaused ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-                    {!isPaused ? '暂停' : '继续'}
-                </button>
-            )}
-
             {selectedTasks.size > 0 && (
                 <button 
                     onClick={handleBatchDelete} 
@@ -316,14 +326,10 @@ const DownloadsPage: React.FC<{ isOfflineMode?: boolean }> = ({ isOfflineMode = 
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
-        {[
-            { id: 'all', label: '全部' },
-            { id: 'downloading', label: '进行中' },
-            { id: 'completed', label: '已完成' }
-        ].map(tab => (
+        {tabs.map(tab => (
             <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => setActiveTab(tab.id)}
                 className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${
                     activeTab === tab.id
                         ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/30'

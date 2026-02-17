@@ -6,14 +6,12 @@ import {
   Search, 
   Heart, 
   Settings, 
-  User, 
   LogOut, 
   Menu, 
   X,
   Database,
   Users,
   Terminal,
-  Headphones,
   Download
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
@@ -21,9 +19,59 @@ import { useTheme } from '../hooks/useTheme';
 import { usePlayerStore } from '../store/playerStore';
 import apiClient from '../api/client';
 import logoImg from '../assets/logo.png';
-import { isApp, isElectron } from '../utils/env';
-
 import Player from './Player';
+
+type MenuItem = {
+  icon: React.ReactElement;
+  label: string;
+  path: string;
+  requireAuth?: boolean;
+  onlineOnly?: boolean;
+};
+
+type NavLinkProps = {
+  item: MenuItem;
+  mobile?: boolean;
+  isActive: boolean;
+  onClick?: () => void;
+};
+
+const NavLink: React.FC<NavLinkProps> = ({ item, mobile = false, isActive, onClick }) => {
+  if (mobile) {
+    const icon = React.isValidElement(item.icon)
+      ? React.cloneElement(item.icon as React.ReactElement<{ size?: number }>, { size: 22 })
+      : item.icon;
+    return (
+      <Link
+        to={item.path}
+        onClick={onClick}
+        className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
+          isActive ? 'text-primary-600' : 'text-slate-500 dark:text-slate-400'
+        }`}
+      >
+        <div className={`p-1.5 rounded-xl transition-all ${isActive ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}>
+          {icon}
+        </div>
+        <span className="text-[10px] font-bold mt-0.5">{item.label}</span>
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      to={item.path}
+      onClick={onClick}
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+        isActive 
+          ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/30' 
+          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+      }`}
+    >
+      {item.icon}
+      <span className="font-medium">{item.label}</span>
+    </Link>
+  );
+};
 
 const Layout: React.FC = () => {
   const { refreshTheme } = useTheme(); // Initialize theme application
@@ -54,7 +102,7 @@ const Layout: React.FC = () => {
         // Try to fetch current user info to validate token
         await apiClient.get('/api/me');
         setIsConnecting(false);
-      } catch (err: any) {
+      } catch (err) {
         console.error('Connection validation failed', err);
         // Don't auto-logout immediately, give user a chance to see error or retry
         setConnectionError('连接服务器失败或登录已过期');
@@ -82,15 +130,15 @@ const Layout: React.FC = () => {
         }
       }).catch(err => console.error('Failed to sync user settings', err));
     }
-  }, [user?.id, setPlaybackSpeed, isConnecting, connectionError]);
+  }, [user, setPlaybackSpeed, isConnecting, connectionError]);
 
   React.useEffect(() => {
     refreshTheme();
-  }, []);
+  }, [refreshTheme]);
 
   const isOffline = !navigator.onLine;
 
-  const menuItems = [
+  const menuItems: MenuItem[] = [
     { icon: <Home size={20} />, label: '首页', path: '/', requireAuth: true, onlineOnly: true },
     { icon: <Library size={20} />, label: '书架', path: '/bookshelf', requireAuth: true, onlineOnly: true },
     { icon: <Search size={20} />, label: '搜索', path: '/search', requireAuth: true, onlineOnly: true },
@@ -103,12 +151,21 @@ const Layout: React.FC = () => {
       return user ? true : !item.requireAuth;
   });
 
-  const adminItems = [
-    { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries', onlineOnly: true },
-    { icon: <Download size={20} />, label: '缓存管理', path: '/downloads' },
-    { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks', onlineOnly: true },
-    { icon: <Users size={20} />, label: '用户管理', path: '/admin/users', onlineOnly: true },
-  ].filter(item => {
+  const cacheItem: MenuItem = { icon: <Download size={20} />, label: '缓存管理', path: '/downloads' };
+
+  let managementItems: MenuItem[] = [];
+  if (user?.role === 'admin') {
+      managementItems = [
+          { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries', onlineOnly: true },
+          cacheItem,
+          { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks', onlineOnly: true },
+          { icon: <Users size={20} />, label: '用户管理', path: '/admin/users', onlineOnly: true },
+      ];
+  } else {
+      managementItems = [cacheItem];
+  }
+
+  managementItems = managementItems.filter(item => {
       if (isOffline && item.onlineOnly) return false;
       return true;
   });
@@ -132,41 +189,6 @@ const Layout: React.FC = () => {
   // But navigation to Settings is useful.
   
   // Let's refine the sidebar rendering to be super minimal in offline mode.
-
-  const NavLink = ({ item, mobile = false }: { item: typeof menuItems[0], mobile?: boolean }) => {
-    const isActive = location.pathname === item.path;
-    
-    if (mobile) {
-      return (
-        <Link
-          to={item.path}
-          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
-            isActive ? 'text-primary-600' : 'text-slate-500 dark:text-slate-400'
-          }`}
-        >
-          <div className={`p-1.5 rounded-xl transition-all ${isActive ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}>
-            {React.cloneElement(item.icon as React.ReactElement<any>, { size: 22 })}
-          </div>
-          <span className="text-[10px] font-bold mt-0.5">{item.label}</span>
-        </Link>
-      );
-    }
-
-    return (
-      <Link
-        to={item.path}
-        onClick={() => setIsSidebarOpen(false)}
-        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-          isActive 
-            ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/30' 
-            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-        }`}
-      >
-        {item.icon}
-        <span className="font-medium">{item.label}</span>
-      </Link>
-    );
-  };
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden">
@@ -195,7 +217,14 @@ const Layout: React.FC = () => {
               {menuItems.length > 0 && (
                   <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4">主菜单</div>
               )}
-              {menuItems.map((item) => <NavLink key={item.path} item={item} />)}
+              {menuItems.map((item) => (
+                <NavLink
+                  key={item.path}
+                  item={item}
+                  isActive={location.pathname === item.path}
+                  onClick={() => setIsSidebarOpen(false)}
+                />
+              ))}
             </div>
             )}
 
@@ -206,11 +235,15 @@ const Layout: React.FC = () => {
               </div>
               )}
               
-              {/* Online Admin Items */}
-              {user?.role === 'admin' && adminItems.map((item) => <NavLink key={item.path} item={item} />)}
-              
-              {/* Cache Management (Always show) */}
-              <NavLink item={{ icon: <Download size={20} />, label: '缓存管理', path: '/downloads' }} />
+              {/* Management Items */}
+              {managementItems.map((item) => (
+                <NavLink
+                  key={item.path}
+                  item={item}
+                  isActive={location.pathname === item.path}
+                  onClick={() => setIsSidebarOpen(false)}
+                />
+              ))}
               
               {/* Settings (Always show) */}
               <Link
@@ -298,7 +331,15 @@ const Layout: React.FC = () => {
             height: 'calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px))'
           }}
         >
-          {menuItems.map((item) => <NavLink key={item.path} item={item} mobile />)}
+          {menuItems.map((item) => (
+            <NavLink
+              key={item.path}
+              item={item}
+              mobile
+              isActive={location.pathname === item.path}
+              onClick={() => setIsSidebarOpen(false)}
+            />
+          ))}
         </div>
 
         {/* Player - Moved inside the right-side container to prevent sidebar overlap */}

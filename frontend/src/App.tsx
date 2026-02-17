@@ -17,11 +17,6 @@ import DownloadsPage from './pages/DownloadsPage';
 import WidgetPage from './pages/WidgetPage';
 import { useAuthStore } from './store/authStore';
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
-};
-
 const ProtectedOutlet = () => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   return isAuthenticated ? <Outlet /> : <Navigate to="/login" />;

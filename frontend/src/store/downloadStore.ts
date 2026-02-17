@@ -4,6 +4,18 @@ import { persist } from 'zustand/middleware';
 // import { downloadToCache as mobileDownload } from '../utils/mobileCacheManager';
 import { useAuthStore } from './authStore';
 
+type DownloadResult = {
+  success: boolean;
+  error?: string;
+};
+
+type ElectronApi = {
+  downloadCover: (url: string, bookId: string, force?: boolean) => Promise<unknown>;
+  downloadChapter: (url: string, fileName: string, taskId: string) => Promise<DownloadResult>;
+};
+
+const getElectronApi = () => (window as Window & { electronAPI?: ElectronApi }).electronAPI;
+
 export interface DownloadTask {
   id: string; // chapterId
   bookId: string;
@@ -13,6 +25,7 @@ export interface DownloadTask {
   chapterId: string;
   title: string;
   chapterNum?: number;
+  duration?: number;
   status: 'pending' | 'downloading' | 'completed' | 'failed';
   progress: number;
   error?: string;
@@ -34,20 +47,16 @@ interface DownloadState {
   retryTask: (taskId: string) => void;
   clearAllTasks: () => void;
   redownloadCover: (taskId: string) => Promise<void>;
-  isPaused: boolean;
-  pauseQueue: () => void;
-  resumeQueue: () => void;
   initializeQueue: () => void;
 }
 
-const isElectron = !!(window as any).electronAPI;
+const isElectron = typeof window !== 'undefined' && !!getElectronApi();
 
 export const useDownloadStore = create<DownloadState>()(
   persist(
     (set, get) => ({
       tasks: [],
       activeTaskId: null,
-      isPaused: false,
 
       initializeQueue: () => {
         set(state => ({
@@ -59,15 +68,6 @@ export const useDownloadStore = create<DownloadState>()(
         get().processQueue();
       },
 
-      pauseQueue: () => {
-        set({ isPaused: true });
-      },
-
-      resumeQueue: () => {
-        set({ isPaused: false });
-        get().processQueue();
-      },
-
       clearAllTasks: () => {
         set({ tasks: [], activeTaskId: null });
       },
@@ -75,7 +75,8 @@ export const useDownloadStore = create<DownloadState>()(
       redownloadCover: async (taskId) => {
         const { tasks } = get();
         const task = tasks.find(t => t.id === taskId);
-        if (!task || !task.coverUrl || !(window as any).electronAPI) return;
+        const electronAPI = getElectronApi();
+        if (!task || !task.coverUrl || !electronAPI) return;
 
         try {
             const authStore = useAuthStore.getState();
@@ -101,7 +102,7 @@ export const useDownloadStore = create<DownloadState>()(
             // For External URLs (Ximalaya etc.), we leave them alone (no token)
             
             console.log('Redownloading cover for task:', taskId, coverDownloadUrl);
-            await (window as any).electronAPI.downloadCover(coverDownloadUrl, task.bookId, true); // force=true
+            await electronAPI.downloadCover(coverDownloadUrl, task.bookId, true);
         } catch (err) {
             console.error('Redownload cover failed', err);
         }
@@ -130,8 +131,8 @@ export const useDownloadStore = create<DownloadState>()(
       },
 
       processQueue: async () => {
-        const { tasks, activeTaskId, startDownload, isPaused } = get();
-        if (activeTaskId || isPaused) return;
+        const { tasks, activeTaskId, startDownload } = get();
+        if (activeTaskId) return;
 
         const nextTask = tasks.find(t => t.status === 'pending');
         if (nextTask) {
@@ -161,6 +162,10 @@ export const useDownloadStore = create<DownloadState>()(
           const fileName = `${task.chapterId}.mp3`;
 
           if (isElectron) {
+             const electronAPI = getElectronApi();
+             if (!electronAPI) {
+               throw new Error('当前环境（Web）暂不支持下载功能');
+             }
              // 1. Trigger cover download (fire and forget, backend checks existence)
              if (task.coverUrl && task.bookId) {
                  // Force download cover when starting a download task to ensure it exists
@@ -178,19 +183,20 @@ export const useDownloadStore = create<DownloadState>()(
                      coverDownloadUrl += `${coverDownloadUrl.includes('?') ? '&' : '?'}token=${token}`;
                  }
                  
-                 (window as any).electronAPI.downloadCover(coverDownloadUrl, task.bookId, true).catch((e: any) => console.error('Cover download trigger failed', e));
+                 electronAPI.downloadCover(coverDownloadUrl, task.bookId, true).catch((error) => console.error('Cover download trigger failed', error));
              }
 
-             const result = await (window as any).electronAPI.downloadChapter(downloadUrl, fileName, taskId);
-             if (!result.success) throw new Error(result.error);
+             const result = await electronAPI.downloadChapter(downloadUrl, fileName, taskId);
+             if (!result?.success) throw new Error(result?.error || 'Download failed');
           } else {
              // Mobile download not supported in this client project
              throw new Error('当前环境（Web）暂不支持下载功能');
           }
           
           completeTask(taskId);
-        } catch (err: any) {
-          failTask(taskId, err.message || 'Download failed');
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Download failed';
+          failTask(taskId, message);
         } finally {
           set({ activeTaskId: null });
           get().processQueue();
