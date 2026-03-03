@@ -3,13 +3,13 @@ import { persist } from 'zustand/middleware';
 import type { Book, Chapter } from '../types';
 
 type ChapterProgressMeta = {
-  progress_updated_at?: string;
-  progress_position?: number;
+  progressUpdatedAt?: string;
+  progressPosition?: number;
 };
 
-const getProgressUpdatedAt = (chapter: Chapter) => (chapter as Chapter & ChapterProgressMeta).progress_updated_at;
+const getProgressUpdatedAt = (chapter: Chapter) => (chapter as Chapter & ChapterProgressMeta).progressUpdatedAt;
 const getProgressPosition = (chapter: Chapter) => {
-  const value = (chapter as Chapter & ChapterProgressMeta).progress_position;
+  const value = (chapter as Chapter & ChapterProgressMeta).progressPosition;
   return typeof value === 'number' ? value : 0;
 };
 
@@ -88,13 +88,13 @@ export const usePlayerStore = create<PlayerState>()(
         const newState: Partial<PlayerState> = { 
           currentBook: book, 
           chapters, 
-          currentChapter: chapter,
-          isPlaying: true,
+          currentChapter: chapter, 
+          isPlaying: true, 
           currentTime: resume
         };
 
-        if (book.theme_color) {
-          newState.themeColor = book.theme_color;
+        if (book.themeColor) {
+          newState.themeColor = book.themeColor;
         } else {
           newState.themeColor = '#F2EDE4';
         }
@@ -157,8 +157,8 @@ export const usePlayerStore = create<PlayerState>()(
           currentTime: resume
         };
         
-        if (book.theme_color) {
-          newState.themeColor = book.theme_color;
+        if (book.themeColor) {
+          newState.themeColor = book.themeColor;
         }
 
         set(newState);

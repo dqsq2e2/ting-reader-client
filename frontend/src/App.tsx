@@ -15,6 +15,7 @@ import TaskLogsPage from './pages/TaskLogsPage';
 import SettingsPage from './pages/SettingsPage';
 import DownloadsPage from './pages/DownloadsPage';
 import WidgetPage from './pages/WidgetPage';
+import PluginsPage from './pages/PluginsPage';
 import { useAuthStore } from './store/authStore';
 
 const ProtectedOutlet = () => {
@@ -72,6 +73,11 @@ function App() {
                 <Route path="admin/tasks" element={
                   <AdminRoute>
                     <TaskLogsPage />
+                  </AdminRoute>
+                } />
+                <Route path="admin/plugins" element={
+                  <AdminRoute>
+                    <PluginsPage />
                   </AdminRoute>
                 } />
              </Route>

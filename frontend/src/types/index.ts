@@ -2,68 +2,130 @@ export interface User {
   id: string;
   username: string;
   role: 'admin' | 'user';
-  created_at: string;
+  createdAt: string;
   librariesAccessible?: string[];
   booksAccessible?: string[];
+}
+
+export interface ScraperConfig {
+  defaultSources?: string[];
+  coverSources?: string[];
+  introSources?: string[];
+  authorSources?: string[];
+  narratorSources?: string[];
+  tagsSources?: string[];
+  nfoWritingEnabled?: boolean;
 }
 
 export interface Library {
   id: string;
   name: string;
-  type: 'webdav' | 'local';
+  libraryType: 'webdav' | 'local';
   url: string;
   username?: string;
   password?: string;
-  root_path: string;
-  last_scanned_at?: string;
+  rootPath: string;
+  lastScannedAt?: string;
+  scraperConfig?: ScraperConfig;
+  createdAt: string;
 }
 
 export interface Book {
   id: string;
-  library_id: string;
+  libraryId: string;
   title: string;
   author?: string;
   narrator?: string;
   description?: string;
-  cover_url?: string;
-  theme_color?: string;
+  coverUrl?: string;
+  themeColor?: string;
   path: string;
-  book_hash: string;
-  created_at: string;
-  updated_at: string;
-  is_favorite?: boolean;
-  library_type?: 'webdav' | 'local';
-  skip_intro?: number;
-  skip_outro?: number;
+  hash: string;
+  createdAt: string;
+  updatedAt?: string;
+  isFavorite?: boolean;
+  libraryType?: 'webdav' | 'local';
+  skipIntro?: number;
+  skipOutro?: number;
   tags?: string;
+  chapterRegex?: string;
 }
 
 export interface Chapter {
   id: string;
-  book_id: string;
+  bookId: string;
   title: string;
   path: string;
   duration: number;
-  chapter_index: number;
-  is_extra?: number;
-  progress_position?: number;
+  chapterIndex: number;
+  isExtra?: number;
+  progressPosition?: number;
+  progressUpdatedAt?: string;
 }
 
 export interface Progress {
-  book_id: string;
-  chapter_id: string;
+  bookId: string;
+  chapterId: string;
   position: number;
-  updated_at: string;
-  book_title?: string;
-  chapter_title?: string;
-  cover_url?: string;
-  library_id?: string;
-  chapter_duration?: number;
+  updatedAt: string;
+  bookTitle?: string;
+  chapterTitle?: string;
+  coverUrl?: string;
+  libraryId?: string;
+  chapterDuration?: number;
 }
 
 export interface Stats {
-  total_books: number;
-  total_chapters: number;
-  total_duration: number;
-  last_scan_time?: string;
+  totalBooks: number;
+  totalChapters: number;
+  totalDuration: number;
+  lastScanTime?: string;
+}
+
+export interface Plugin {
+  id: string;
+  name: string;
+  version: string;
+  pluginType: 'scraper' | 'format' | 'utility';
+  author: string;
+  description: string;
+  state: 'active' | 'inactive' | 'loading' | 'failed';
+  totalCalls?: number;
+  successfulCalls?: number;
+  failedCalls?: number;
+  successRate?: number;
+}
+
+export interface MergeSuggestion {
+  id: string;
+  sourceBookId: string;
+  sourceBookTitle: string;
+  targetBookId: string;
+  targetBookTitle: string;
+  score: number;
+  reason: string;
+  status: 'pending' | 'merged' | 'ignored';
+  createdAt: string;
+}
+
+export interface BookMetadata {
+  title: string;
+  author: string;
+  narrator: string;
+  description: string;
+  coverUrl: string;
+  tags?: string[];
+}
+
+export interface ChapterChange {
+  index: number;
+  currentTitle: string | null;
+  scrapedTitle: string | null;
+  status: 'match' | 'update' | 'missing' | 'new';
+}
+
+export interface ScrapeDiff {
+  current: BookMetadata;
+  scraped: BookMetadata;
+  chapterChanges: ChapterChange[];
 }

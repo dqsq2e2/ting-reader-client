@@ -10,22 +10,25 @@ import {
   Database,
   Search
 } from 'lucide-react';
+import { formatDate } from '../utils/date';
+import { formatTaskPayload, getTaskStatusText } from '../utils/task';
 
 interface Task {
   id: string;
-  type: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  taskType: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   payload: string;
   message?: string;
   error?: string;
-  created_at: string;
-  updated_at: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 const TaskLogsPage: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
+
   useEffect(() => {
     fetchTasks();
     let interval: ReturnType<typeof setInterval>;
@@ -38,8 +41,7 @@ const TaskLogsPage: React.FC = () => {
   const fetchTasks = async () => {
     try {
       const response = await apiClient.get('/api/tasks');
-      // Filter out download tasks to avoid clutter
-      setTasks(response.data.filter((t: Task) => t.type !== 'download'));
+      setTasks(response.data);
     } catch (err) {
       console.error('Failed to fetch tasks', err);
     } finally {
@@ -51,26 +53,9 @@ const TaskLogsPage: React.FC = () => {
     switch (status) {
       case 'completed': return <CheckCircle2 className="text-green-500" size={20} />;
       case 'failed': return <XCircle className="text-red-500" size={20} />;
-      case 'processing': return <Loader2 className="text-blue-500 animate-spin" size={20} />;
+      case 'running': return <Loader2 className="text-blue-500 animate-spin" size={20} />;
+      case 'cancelled': return <XCircle className="text-gray-400" size={20} />;
       default: return <Clock className="text-slate-400" size={20} />;
-    }
-  };
-
-  const getStatusText = (status: Task['status']) => {
-    switch (status) {
-      case 'completed': return '已完成';
-      case 'failed': return '失败';
-      case 'processing': return '进行中';
-      default: return '等待中';
-    }
-  };
-
-  const parsePayload = (payload: string) => {
-    try {
-      const data = JSON.parse(payload);
-      return data.libraryId ? `扫描库 ID: ${data.libraryId.substring(0, 8)}...` : payload;
-    } catch {
-      return payload;
     }
   };
 
@@ -122,27 +107,27 @@ const TaskLogsPage: React.FC = () => {
               <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
                 <div className="flex items-start gap-4 w-full sm:w-auto">
                   <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${
-                    task.type === 'scan' ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20' : 'bg-purple-50 text-purple-600 dark:bg-purple-900/20'
+                    task.taskType === 'scan' ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20' : 'bg-purple-50 text-purple-600 dark:bg-purple-900/20'
                   }`}>
-                    {task.type === 'scan' ? <Database size={20} className="sm:w-6 sm:h-6" /> : <Search size={20} className="sm:w-6 sm:h-6" />}
+                    {task.taskType === 'scan' ? <Database size={20} className="sm:w-6 sm:h-6" /> : <Search size={20} className="sm:w-6 sm:h-6" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-1">
                       <span className="font-bold text-sm sm:text-base dark:text-white truncate">
-                        {task.type === 'scan' ? '库扫描任务' : '刮削任务'}
+                        {task.taskType === 'scan' ? '库扫描任务' : '刮削任务'}
                       </span>
                       <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md shrink-0 ${
                         task.status === 'completed' ? 'bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400' :
                         task.status === 'failed' ? 'bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400' :
                         'bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
                       }`}>
-                        {getStatusText(task.status)}
+                        {getTaskStatusText(task.status)}
                       </span>
                     </div>
-                    <p className="text-xs sm:text-sm text-slate-500 break-all">{parsePayload(task.payload)}</p>
+                    <p className="text-xs sm:text-sm text-slate-500 break-all">{formatTaskPayload(task.payload)}</p>
                     {task.message && (
                       <p className="text-xs sm:text-sm font-medium text-primary-600 dark:text-primary-400 mt-2 flex items-center gap-2">
-                        <Loader2 size={12} className={`sm:w-3.5 sm:h-3.5 ${task.status === 'processing' ? 'animate-spin' : ''}`} />
+                        <Loader2 size={12} className={`sm:w-3.5 sm:h-3.5 ${task.status === 'running' ? 'animate-spin' : ''}`} />
                         <span className="truncate">{task.message}</span>
                       </p>
                     )}
@@ -156,11 +141,11 @@ const TaskLogsPage: React.FC = () => {
                 
                 <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto mt-2 sm:mt-0 pt-2 sm:pt-0 border-t border-slate-100 dark:border-slate-800 sm:border-none">
                   <div className="flex items-center gap-2 sm:mb-1 order-2 sm:order-1">
-                    <span className="text-xs text-slate-500 sm:hidden">{getStatusText(task.status)}</span>
+                    <span className="text-xs text-slate-500 sm:hidden">{getTaskStatusText(task.status)}</span>
                     {getStatusIcon(task.status)}
                   </div>
                   <div className="text-xs text-slate-400 order-1 sm:order-2">
-                    {new Date(task.created_at).toLocaleString()}
+                    {formatDate(task.createdAt)}
                   </div>
                 </div>
               </div>

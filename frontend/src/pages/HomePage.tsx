@@ -90,24 +90,24 @@ const HomePage: React.FC = () => {
         <StatCard 
           icon={<BookIcon className="text-blue-500" size={20} />} 
           label="书籍总数" 
-          value={stats?.total_books || 0} 
+          value={stats?.totalBooks || 0} 
           unit="本"
         />
         <StatCard 
           icon={<Layers className="text-purple-500" size={20} />} 
           label="章节总数" 
-          value={stats?.total_chapters || 0} 
+          value={stats?.totalChapters || 0} 
           unit="章"
         />
         <StatCard 
           icon={<Clock className="text-orange-500" size={20} />} 
           label="总时长" 
-          value={formatDuration(stats?.total_duration || 0)} 
+          value={formatDuration(stats?.totalDuration || 0)} 
         />
         <StatCard 
           icon={<TrendingUp className="text-green-500" size={20} />} 
           label="最近更新" 
-          value={stats?.last_scan_time ? new Date(stats.last_scan_time).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '从未'} 
+          value={stats?.lastScanTime ? new Date(stats.lastScanTime).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '从未'} 
         />
       </div>
 
@@ -124,7 +124,7 @@ const HomePage: React.FC = () => {
         {recentPlays.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {recentPlays.map((progress) => (
-              <RecentPlayCard key={progress.book_id} progress={progress} />
+              <RecentPlayCard key={progress.bookId} progress={progress} />
             ))}
           </div>
         ) : (
@@ -165,13 +165,13 @@ const StatCard = ({ icon, label, value, unit = '' }: { icon: React.ReactNode, la
 
 const RecentPlayCard = ({ progress }: { progress: Progress }) => (
   <Link 
-    to={`/book/${progress.book_id}`}
+    to={`/book/${progress.bookId}`}
     className="bg-white dark:bg-slate-900 rounded-2xl p-3 md:p-4 shadow-sm border border-slate-100 dark:border-slate-800 flex gap-3 md:gap-4 hover:shadow-md transition-shadow group"
   >
     <div className="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden shrink-0 shadow-sm">
       <img 
-        src={getCoverUrl(progress.cover_url, progress.library_id, progress.book_id)} 
-        alt={progress.book_title}
+        src={getCoverUrl(progress.coverUrl, progress.libraryId, progress.bookId)} 
+        alt={progress.bookTitle}
         crossOrigin="anonymous"
         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
         onError={(e) => {
@@ -182,21 +182,21 @@ const RecentPlayCard = ({ progress }: { progress: Progress }) => (
     <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
       <div className="min-w-0">
         <ExpandableTitle 
-          title={progress.book_title || ''} 
+          title={progress.bookTitle || ''} 
           className="font-bold text-sm md:text-base dark:text-white group-hover:text-primary-600 transition-colors" 
           maxLines={1} 
         />
-        <p className="text-xs text-slate-500 truncate mt-0.5">正在播放: {progress.chapter_title}</p>
+        <p className="text-xs text-slate-500 truncate mt-0.5">正在播放: {progress.chapterTitle}</p>
       </div>
       <div className="flex items-center justify-between mt-2">
         <div className="flex-1 h-1 bg-slate-100 dark:bg-slate-800 rounded-full mr-3 overflow-hidden">
           <div 
             className="h-full bg-primary-500 rounded-full" 
-            style={{ width: `${Math.min(100, Math.round((progress.position / (progress.chapter_duration || 1)) * 100))}%` }}
+            style={{ width: `${Math.min(100, Math.round((progress.position / (progress.chapterDuration || 1)) * 100))}%` }}
           ></div>
         </div>
         <span className="text-[10px] text-slate-400 shrink-0">
-          {Math.min(100, Math.round((progress.position / (progress.chapter_duration || 1)) * 100))}%
+          {Math.min(100, Math.round((progress.position / (progress.chapterDuration || 1)) * 100))}%
         </span>
       </div>
     </div>

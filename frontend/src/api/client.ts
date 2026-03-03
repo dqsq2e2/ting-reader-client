@@ -1,4 +1,6 @@
 import axios from 'axios';
+import camelcaseKeys from 'camelcase-keys';
+import snakecaseKeys from 'snakecase-keys';
 import { useAuthStore } from '../store/authStore';
 
 type ElectronApi = {
@@ -48,6 +50,17 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Transform request data to snake_case
+  if (config.data && config.headers['Content-Type'] === 'application/json') {
+    config.data = snakecaseKeys(config.data, { deep: true });
+  }
+
+  // Transform params to snake_case
+  if (config.params) {
+    config.params = snakecaseKeys(config.params, { deep: true });
+  }
+
   return config;
 });
 
@@ -58,6 +71,12 @@ apiClient.interceptors.response.use(
     if (response.request && response.request.responseURL) {
       // ... (existing logic if needed)
     }
+
+    // Transform response data to camelCase
+    if (response.data && response.headers['content-type']?.includes('application/json')) {
+      response.data = camelcaseKeys(response.data, { deep: true });
+    }
+
     return response;
   },
   async (error) => {

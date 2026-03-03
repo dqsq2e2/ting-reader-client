@@ -12,6 +12,7 @@ import {
   X,
   Edit
 } from 'lucide-react';
+import { formatDate } from '../utils/date';
 
 type UserFormData = {
   username: string;
@@ -249,7 +250,7 @@ const AdminUsers: React.FC = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 text-sm text-slate-500">
                       <Calendar size={14} />
-                      {new Date(u.created_at).toLocaleDateString()}
+                      {formatDate(u.createdAt)}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -315,7 +316,7 @@ const AdminUsers: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
                   <Calendar size={14} />
-                  {new Date(u.created_at).toLocaleDateString()}
+                  {formatDate(u.createdAt)}
                 </div>
               </div>
             </div>

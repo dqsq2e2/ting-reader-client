@@ -101,10 +101,13 @@ const SettingsPage: React.FC = () => {
       const response = await apiClient.get<Partial<SettingsPayload>>('/api/settings');
       const fetchedSettings: SettingsPayload = {
         ...defaultSettings,
-        ...response.data,
-        auto_preload: !!response.data?.auto_preload,
-        auto_cache: !!response.data?.auto_cache,
-        client_auto_download: !!response.data?.client_auto_download
+        playback_speed: response.data?.playbackSpeed ?? 1.0,
+        sleep_timer_default: response.data?.sleepTimerDefault ?? 0,
+        auto_preload: response.data?.settingsJson?.autoPreload !== undefined ? !!response.data.settingsJson.autoPreload : !!response.data?.autoPreload,
+        auto_cache: response.data?.settingsJson?.autoCache !== undefined ? !!response.data.settingsJson.autoCache : !!response.data?.autoCache,
+        client_auto_download: !!(response.data?.clientAutoDownload || response.data?.settingsJson?.clientAutoDownload),
+        theme: response.data?.theme ?? 'system',
+        widget_css: response.data?.widgetCss ?? ''
       };
       setSettings(fetchedSettings);
       // Ensure local theme matches server theme
@@ -127,6 +130,27 @@ const SettingsPage: React.FC = () => {
 
   const handleSave = async (newSettings: SettingsPayload) => {
     try {
+      // Create a payload for the API that maps back to camelCase for the client interceptor to transform to snake_case
+      // Actually, the interceptor transforms ALL keys to snake_case.
+      // So if we pass `playback_speed` (snake), it might become `playback_speed` (snake).
+      // BUT if we pass `playbackSpeed` (camel), it becomes `playback_speed` (snake).
+      // The issue is likely that `newSettings` here uses snake_case keys because we defined SettingsPayload with snake_case.
+      // However, `apiClient` response interceptor transforms incoming data to camelCase.
+      // So `fetchSettings` receives camelCase data, but we force it into `SettingsPayload` (snake_case) type?
+      // Wait, `response.data` is camelCased.
+      // `fetchedSettings` mixes snake_case keys (from `defaultSettings` and `SettingsPayload` type) with values from `response.data`.
+      // If `response.data` has `playbackSpeed`, `response.data.playback_speed` is undefined.
+      // So `fetchedSettings.playback_speed` becomes undefined or default.
+      
+      // We should probably standardize on camelCase in the frontend state and map to snake_case only when sending?
+      // OR, we fix the mapping in `fetchSettings` as done above.
+      
+      // Now for saving:
+      // `newSettings` has snake_case keys (from `SettingsPayload`).
+      // `apiClient` request interceptor transforms data to snake_case.
+      // If we pass `playback_speed`, snakecase-keys might keep it as is or double underscore?
+      // `snakecase-keys` usually preserves existing snake_case.
+      
       await apiClient.post('/api/settings', newSettings);
       setSettings(newSettings);
       
@@ -294,7 +318,7 @@ const SettingsPage: React.FC = () => {
         </section>
 
         {/* Cache Settings (Electron Only) */}
-        {isElectron && (
+        {isElectron && user?.role === 'admin' && (
           <section className="bg-white dark:bg-slate-900 rounded-3xl p-4 md:p-6 border border-slate-100 dark:border-slate-800 shadow-sm">
             <h2 className="text-xl font-bold dark:text-white mb-6 flex items-center gap-2">
               <Zap size={20} className="text-yellow-500" />
@@ -421,6 +445,7 @@ const SettingsPage: React.FC = () => {
         </section>
 
         {/* Widget Settings */}
+        {user?.role === 'admin' && (
         <section className="bg-white dark:bg-slate-900 rounded-3xl p-4 md:p-6 border border-slate-100 dark:border-slate-800 shadow-sm">
           <h2 className="text-xl font-bold dark:text-white mb-6 flex items-center gap-2">
             <Code size={20} className="text-purple-500" />
@@ -474,12 +499,17 @@ const SettingsPage: React.FC = () => {
                   {`<iframe src="${window.location.origin}/widget${widgetEmbedType === 'private' ? `?token=${useAuthStore.getState().token}` : ''}" width="100%" height="150" frameborder="0" allow="autoplay; fullscreen"></iframe>`}
                 </code>
                 <button 
-                  onClick={() => {
+                  onClick={async () => {
                     const baseUrl = window.location.origin;
                     const token = widgetEmbedType === 'private' ? `?token=${useAuthStore.getState().token}` : '';
                     const embedCode = `<iframe src="${baseUrl}/widget${token}" width="100%" height="150" frameborder="0" allow="autoplay; fullscreen"></iframe>`;
-                    navigator.clipboard.writeText(embedCode);
-                    alert('已复制到剪贴板');
+                    try {
+                      await navigator.clipboard.writeText(embedCode);
+                      alert('已复制到剪贴板');
+                    } catch (err) {
+                      console.error('Failed to copy:', err);
+                      alert('复制失败，请手动复制');
+                    }
                   }}
                   className="absolute top-2 right-2 p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-primary-900/30 text-slate-500 hover:text-primary-600 rounded-lg transition-colors"
                   title="复制"
@@ -522,12 +552,17 @@ const SettingsPage: React.FC = () => {
 </div>`}
                     </code>
                     <button 
-                      onClick={() => {
+                      onClick={async () => {
                         const code = `<div style="position: fixed; bottom: 0; left: 0; width: 100%; z-index: 9999;">
   <iframe src="${window.location.origin}/widget${widgetEmbedType === 'private' ? `?token=${useAuthStore.getState().token}` : ''}" width="100%" height="150" frameborder="0" allow="autoplay; fullscreen"></iframe>
 </div>`;
-                        navigator.clipboard.writeText(code);
-                        alert('已复制到剪贴板');
+                        try {
+                          await navigator.clipboard.writeText(code);
+                          alert('已复制到剪贴板');
+                        } catch (err) {
+                          console.error('Failed to copy:', err);
+                          alert('复制失败，请手动复制');
+                        }
                       }}
                       className="absolute top-2 right-2 p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-primary-900/30 text-slate-500 hover:text-primary-600 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                       title="复制"
@@ -544,12 +579,17 @@ const SettingsPage: React.FC = () => {
 </div>`}
                     </code>
                     <button 
-                      onClick={() => {
+                      onClick={async () => {
                         const code = `<div style="position: fixed; bottom: 20px; right: 20px; width: 350px; height: 150px; z-index: 9999; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
   <iframe src="${window.location.origin}/widget${widgetEmbedType === 'private' ? `?token=${useAuthStore.getState().token}` : ''}" width="100%" height="100%" frameborder="0" allow="autoplay; fullscreen"></iframe>
 </div>`;
-                        navigator.clipboard.writeText(code);
-                        alert('已复制到剪贴板');
+                        try {
+                          await navigator.clipboard.writeText(code);
+                          alert('已复制到剪贴板');
+                        } catch (err) {
+                          console.error('Failed to copy:', err);
+                          alert('复制失败，请手动复制');
+                        }
                       }}
                       className="absolute top-2 right-2 p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-primary-900/30 text-slate-500 hover:text-primary-600 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                       title="复制"
@@ -562,6 +602,7 @@ const SettingsPage: React.FC = () => {
             </div>
           </div>
         </section>
+        )}
       </div>
 
       <div className="text-center text-slate-400 text-sm py-8">

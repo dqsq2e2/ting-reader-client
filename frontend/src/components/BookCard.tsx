@@ -19,7 +19,7 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
     >
       <div className="relative aspect-[3/4] overflow-hidden">
         <img 
-          src={getCoverUrl(book.cover_url, book.library_id, book.id)} 
+          src={getCoverUrl(book.coverUrl, book.libraryId, book.id)} 
           alt={book.title}
           crossOrigin="anonymous"
           className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
@@ -30,7 +30,7 @@ const BookCard: React.FC<BookCardProps> = ({ book }) => {
         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
           <div 
             className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-primary-600 text-white flex items-center justify-center shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform"
-            style={book.theme_color ? { backgroundColor: toSolidColor(book.theme_color) } : {}}
+            style={book.themeColor ? { backgroundColor: toSolidColor(book.themeColor) } : {}}
           >
             <Play size={20} fill="currentColor" />
           </div>

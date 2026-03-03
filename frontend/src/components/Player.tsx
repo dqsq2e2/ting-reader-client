@@ -192,11 +192,11 @@ const Player: React.FC = () => {
 
   // Use stored theme color from book to avoid flash
   useEffect(() => {
-    if (currentBook?.theme_color) {
-      setThemeColor(currentBook.theme_color);
-    } else if (currentBook?.cover_url) {
+    if (currentBook?.themeColor) {
+      setThemeColor(currentBook.themeColor);
+    } else if (currentBook?.coverUrl) {
       const fac = new FastAverageColor();
-      const url = getCoverUrl(currentBook.cover_url, currentBook.library_id, currentBook.id);
+      const url = getCoverUrl(currentBook.coverUrl, currentBook.libraryId, currentBook.id);
       fac.getColorAsync(url, { algorithm: 'dominant' })
         .then(color => {
           setThemeColor(color.rgba);
@@ -205,7 +205,7 @@ const Player: React.FC = () => {
           // Ignore errors
         });
     }
-  }, [currentBook?.id, currentBook?.theme_color, currentBook?.cover_url, currentBook?.library_id, setThemeColor]);
+  }, [currentBook?.id, currentBook?.themeColor, currentBook?.coverUrl, currentBook?.libraryId, setThemeColor]);
 
   const getOfflineSkipSettings = (bookId: string) => {
     try {
@@ -217,7 +217,7 @@ const Player: React.FC = () => {
   };
 
   const saveOfflineSkipSettings = (bookId: string, skipIntro: number, skipOutro: number) => {
-    localStorage.setItem(`offline_skip_${bookId}`, JSON.stringify({ skip_intro: skipIntro, skip_outro: skipOutro }));
+    localStorage.setItem(`offline_skip_${bookId}`, JSON.stringify({ skipIntro, skipOutro }));
   };
 
   const isOfflineMode = !navigator.onLine || window.location.hash.includes('/offline');
@@ -226,26 +226,26 @@ const Player: React.FC = () => {
     if (!currentBook) return;
     if (isOfflineMode) {
       const cached = getOfflineSkipSettings(currentBook.id);
-      const skipIntro = cached?.skip_intro ?? currentBook.skip_intro ?? 0;
-      const skipOutro = cached?.skip_outro ?? currentBook.skip_outro ?? 0;
+      const skipIntro = cached?.skipIntro ?? currentBook.skipIntro ?? 0;
+      const skipOutro = cached?.skipOutro ?? currentBook.skipOutro ?? 0;
       queueMicrotask(() => {
         setEditSkipIntro(skipIntro);
         setEditSkipOutro(skipOutro);
       });
       
       // Prevent infinite loop: only update if values actually changed
-      if (currentBook.skip_intro !== skipIntro || currentBook.skip_outro !== skipOutro) {
+      if (currentBook.skipIntro !== skipIntro || currentBook.skipOutro !== skipOutro) {
         usePlayerStore.setState(state => ({
           currentBook: state.currentBook ? {
             ...state.currentBook,
-            skip_intro: skipIntro,
-            skip_outro: skipOutro
+            skipIntro,
+            skipOutro
           } : null
         }));
       }
     } else {
-      const skipIntro = currentBook.skip_intro ?? 0;
-      const skipOutro = currentBook.skip_outro ?? 0;
+      const skipIntro = currentBook.skipIntro ?? 0;
+      const skipOutro = currentBook.skipOutro ?? 0;
       queueMicrotask(() => {
         setEditSkipIntro(skipIntro);
         setEditSkipOutro(skipOutro);
@@ -261,8 +261,8 @@ const Player: React.FC = () => {
       usePlayerStore.setState(state => ({
         currentBook: state.currentBook ? {
           ...state.currentBook,
-          skip_intro: editSkipIntro,
-          skip_outro: editSkipOutro
+          skipIntro: editSkipIntro,
+          skipOutro: editSkipOutro
         } : null
       }));
       setShowSettings(false);
@@ -270,14 +270,14 @@ const Player: React.FC = () => {
     }
     try {
       await apiClient.patch(`/api/books/${currentBook.id}`, {
-        skip_intro: editSkipIntro,
-        skip_outro: editSkipOutro
+        skipIntro: editSkipIntro,
+        skipOutro: editSkipOutro
       });
       usePlayerStore.setState(state => ({
         currentBook: state.currentBook ? {
           ...state.currentBook,
-          skip_intro: editSkipIntro,
-          skip_outro: editSkipOutro
+          skipIntro: editSkipIntro,
+          skipOutro: editSkipOutro
         } : null
       }));
       saveOfflineSkipSettings(currentBook.id, editSkipIntro, editSkipOutro);
@@ -293,8 +293,8 @@ const Player: React.FC = () => {
     for (let i = 0; i < chapters.length; i += chaptersPerGroup) {
       const slice = chapters.slice(i, i + chaptersPerGroup);
       g.push({
-        start: slice[0]?.chapter_index || (i + 1),
-        end: slice[slice.length - 1]?.chapter_index || (i + slice.length),
+        start: slice[0]?.chapterIndex || (i + 1),
+        end: slice[slice.length - 1]?.chapterIndex || (i + slice.length),
         chapters: slice
       });
     }
@@ -317,9 +317,24 @@ const Player: React.FC = () => {
   useEffect(() => {
     if (!navigator.onLine || window.location.hash.includes('/offline')) return;
     apiClient.get('/api/settings').then(res => {
-      setAutoPreload(!!res.data.auto_preload);
-      setAutoCache(!!res.data.auto_cache);
-      setClientAutoDownload(!!res.data.client_auto_download);
+      // Check settingsJson first as these might be stored there
+      const settingsJson = res.data.settingsJson || {};
+      
+      const ap = settingsJson.autoPreload !== undefined ? settingsJson.autoPreload : 
+                 (settingsJson.auto_preload !== undefined ? settingsJson.auto_preload : 
+                 (res.data.autoPreload !== undefined ? res.data.autoPreload : res.data.auto_preload));
+      
+      const ac = settingsJson.autoCache !== undefined ? settingsJson.autoCache : 
+                 (settingsJson.auto_cache !== undefined ? settingsJson.auto_cache : 
+                 (res.data.autoCache !== undefined ? res.data.autoCache : res.data.auto_cache));
+
+      setAutoPreload(!!ap);
+      setAutoCache(!!ac);
+
+      const cad = settingsJson.clientAutoDownload !== undefined ? settingsJson.clientAutoDownload : 
+                  (settingsJson.client_auto_download !== undefined ? settingsJson.client_auto_download : 
+                  (res.data.clientAutoDownload || res.data.client_auto_download));
+      setClientAutoDownload(!!cad);
     }).catch(err => console.error('Failed to fetch settings', err));
   }, [setClientAutoDownload]);
 
@@ -345,8 +360,8 @@ const Player: React.FC = () => {
     const offlineChapters = sorted.map((task, index) => ({
       id: task.chapterId,
       title: task.title,
-      book_id: task.bookId,
-      chapter_index: task.chapterNum ?? index + 1,
+      bookId: task.bookId,
+      chapterIndex: task.chapterNum ?? index + 1,
       duration: task.duration || 0
     }));
     queueMicrotask(() => {
@@ -486,10 +501,10 @@ const Player: React.FC = () => {
                   id: nextChapter.id,
                   bookId: currentBook.id,
                   bookTitle: currentBook.title,
-                  coverUrl: currentBook.cover_url,
+                  coverUrl: currentBook.coverUrl,
                   chapterId: nextChapter.id,
                   title: nextChapter.title,
-                  chapterNum: nextChapter.chapter_index
+                  chapterNum: nextChapter.chapterIndex
               });
            }
         }
@@ -542,18 +557,18 @@ const Player: React.FC = () => {
     }
 
     // Handle Skip Intro
-    if (isInitialLoadRef.current && currentBook?.skip_intro) {
-      if (time < currentBook.skip_intro) {
-        audioRef.current.currentTime = currentBook.skip_intro;
-        setCurrentTime(currentBook.skip_intro);
+    if (isInitialLoadRef.current && currentBook?.skipIntro) {
+      if (time < currentBook.skipIntro) {
+        audioRef.current.currentTime = currentBook.skipIntro;
+        setCurrentTime(currentBook.skipIntro);
       }
       isInitialLoadRef.current = false;
     }
 
     // Handle Skip Outro
-    if (currentBook?.skip_outro && duration > 0) {
-      const minChapterDuration = (currentBook.skip_intro || 0) + currentBook.skip_outro + 10;
-      if (duration > minChapterDuration && (duration - time) <= currentBook.skip_outro) {
+    if (currentBook?.skipOutro && duration > 0) {
+      const minChapterDuration = (currentBook.skipIntro || 0) + currentBook.skipOutro + 10;
+      if (duration > minChapterDuration && (duration - time) <= currentBook.skipOutro) {
         nextChapter();
       }
     }
@@ -714,9 +729,9 @@ const Player: React.FC = () => {
   };
 
   const getChapterProgressText = (chapter: Chapter) => {
-    if (!chapter.progress_position || !chapter.duration) return null;
+    if (!chapter.progressPosition || !chapter.duration) return null;
     
-    const percent = Math.floor((chapter.progress_position / chapter.duration) * 100);
+    const percent = Math.floor((chapter.progressPosition / chapter.duration) * 100);
     if (percent === 0) return null;
     if (percent >= 95) return '已播完';
     return `已播${percent}%`;
@@ -882,7 +897,7 @@ const Player: React.FC = () => {
                 onClick={toggleFullscreen}
               >
                 <img 
-                  src={getCoverUrl(currentBook?.cover_url, currentBook?.library_id, currentBook?.id)} 
+                  src={getCoverUrl(currentBook?.coverUrl, currentBook?.libraryId, currentBook?.id)} 
                   alt={currentBook?.title}
                   crossOrigin="anonymous"
                   className="w-full h-full object-cover"
@@ -1145,7 +1160,7 @@ const Player: React.FC = () => {
           <div className="flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto w-full gap-4 sm:gap-8">
             <div className="w-full max-w-[240px] sm:max-w-[320px] lg:max-w-[400px] aspect-square rounded-[32px] sm:rounded-[40px] overflow-hidden shadow-2xl border-4 sm:border-8 border-white dark:border-slate-800 transition-all duration-500">
               <img 
-                src={getCoverUrl(currentBook?.cover_url, currentBook?.library_id, currentBook?.id)} 
+                src={getCoverUrl(currentBook?.coverUrl, currentBook?.libraryId, currentBook?.id)} 
                 alt={currentBook?.title}
                 crossOrigin="anonymous"
                 className="w-full h-full object-cover"
@@ -1240,14 +1255,14 @@ const Player: React.FC = () => {
                   <div className="p-2">
                     <SkipBack size={18} className="sm:w-5 sm:h-5" />
                   </div>
-                  <span className="text-[10px] sm:text-xs font-bold whitespace-nowrap">片头 {currentBook?.skip_intro || 0}s</span>
+                  <span className="text-[10px] sm:text-xs font-bold whitespace-nowrap">片头 {currentBook?.skipIntro || 0}s</span>
                 </div>
 
                 <div className="flex flex-col items-center gap-1 sm:gap-1.5">
                   <div className="p-2">
                     <SkipForward size={18} className="sm:w-5 sm:h-5" />
                   </div>
-                  <span className="text-[10px] sm:text-xs font-bold whitespace-nowrap">片尾 {currentBook?.skip_outro || 0}s</span>
+                  <span className="text-[10px] sm:text-xs font-bold whitespace-nowrap">片尾 {currentBook?.skipOutro || 0}s</span>
                 </div>
 
                 <div className="relative" ref={timerMenuRef}>
@@ -1488,7 +1503,7 @@ const Player: React.FC = () => {
                             }`}
                             style={isCurrent ? { backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') } : {}}
                           >
-                            {chapter.chapter_index || (actualIndex + 1)}
+                            {chapter.chapterIndex || (actualIndex + 1)}
                           </div>
                           <div className="min-w-0">
                             <p 
@@ -1532,10 +1547,10 @@ const Player: React.FC = () => {
                                   id: chapter.id,
                                   bookId: currentBook!.id,
                                   bookTitle: currentBook!.title,
-                                  coverUrl: currentBook!.cover_url,
+                                  coverUrl: currentBook!.coverUrl,
                                   chapterId: chapter.id,
                                   title: chapter.title,
-                                  chapterNum: chapter.chapter_index || (actualIndex + 1)
+                                  chapterNum: chapter.chapterIndex || (actualIndex + 1)
                                 });
                               }}
                               className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-full transition-all"

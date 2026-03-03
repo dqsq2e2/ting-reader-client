@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
+import camelcaseKeys from 'camelcase-keys';
 import type { Library } from '../types';
 import { 
   Plus, 
@@ -11,8 +12,210 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
-  Edit
+  Edit,
+  ArrowUp,
+  ArrowDown,
+  X
 } from 'lucide-react';
+
+const ScraperConfigurator = ({ 
+  configStr, 
+  sources, 
+  onChange,
+  libraryType
+}: { 
+  configStr: string, 
+  sources: {id: string, name: string}[], 
+  onChange: (newConfigStr: string) => void,
+  libraryType: string
+}) => {
+  const [activeTab, setActiveTab] = useState('default');
+  
+  const tabs = [
+    { id: 'default', label: '默认', key: 'defaultSources' },
+    { id: 'cover', label: '封面', key: 'coverSources' },
+    { id: 'intro', label: '简介', key: 'introSources' },
+    { id: 'author', label: '作者', key: 'authorSources' },
+    { id: 'narrator', label: '演播', key: 'narratorSources' },
+    { id: 'tags', label: '标签', key: 'tagsSources' },
+  ];
+
+  let config: any = {};
+  try {
+    const parsed = configStr ? JSON.parse(configStr) : {};
+    config = camelcaseKeys(parsed, { deep: true });
+  } catch (e) {
+    config = {};
+  }
+
+  const currentTab = tabs.find(t => t.id === activeTab) || tabs[0];
+  const currentKey = currentTab.key;
+  const activeIds: string[] = config[currentKey] || [];
+  // Use camelCase first (as API transforms it), then fallback to snake_case (though normalized above, just in case)
+  const nfoEnabled = config.nfoWritingEnabled !== undefined ? config.nfoWritingEnabled : (config.nfo_writing_enabled || false);
+
+  const handleNfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      // Always save as camelCase to match API expectations if we want to be consistent,
+      // but if the backend expects snake_case, the apiClient interceptor will handle it.
+      // So we should update state with camelCase.
+      const newConfig = { ...config, nfoWritingEnabled: e.target.checked, nfo_writing_enabled: undefined };
+      // Remove legacy snake_case key to avoid confusion
+      delete newConfig.nfo_writing_enabled;
+      
+      onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handleAdd = (sourceId: string) => {
+    const newConfig = { ...config, [currentKey]: [...activeIds, sourceId] };
+    onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handleRemove = (sourceId: string) => {
+    const newConfig = { ...config, [currentKey]: activeIds.filter(id => id !== sourceId) };
+    onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handleMove = (index: number, direction: 'up' | 'down') => {
+    const newList = [...activeIds];
+    if (direction === 'up' && index > 0) {
+      [newList[index], newList[index - 1]] = [newList[index - 1], newList[index]];
+    } else if (direction === 'down' && index < newList.length - 1) {
+      [newList[index], newList[index + 1]] = [newList[index + 1], newList[index]];
+    }
+    const newConfig = { ...config, [currentKey]: newList };
+    onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const activeSources = activeIds.map(id => {
+    const source = sources.find(s => s.id === id);
+    return source || { id, name: id }; // Fallback for unknown IDs
+  });
+
+  const availableSources = sources.filter(s => !activeIds.includes(s.id));
+
+  return (
+    <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+      {/* NFO Toggle - Only show for local libraries */}
+      {libraryType === 'local' && (
+        <div className="flex items-center gap-3 mb-4 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+          <input 
+            type="checkbox" 
+            id="nfo-writing" 
+            checked={nfoEnabled} 
+            onChange={handleNfoChange}
+            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
+          />
+          <div className="flex flex-col">
+            <label htmlFor="nfo-writing" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+              启用 NFO 元数据写入
+            </label>
+            <span className="text-[10px] text-slate-400">
+              开启后，刮削或修改元数据时将同步写入 book.nfo 文件
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="flex gap-2 overflow-x-auto pb-2 mb-4 border-b border-slate-200 dark:border-slate-700 no-scrollbar">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
+              activeTab === tab.id
+                ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Active List (Ordered) */}
+        <div className="space-y-2">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
+            <span>已启用 (按优先级排序)</span>
+            <span className="text-primary-600">{activeSources.length}</span>
+          </div>
+          <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 min-h-[120px] p-2 space-y-2">
+            {activeSources.length > 0 ? (
+              activeSources.map((source, index) => (
+                <div key={source.id} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-md group">
+                  <span className="text-sm font-medium truncate flex-1 mr-2 dark:text-slate-300">{source.name}</span>
+                  <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onClick={() => handleMove(index, 'up')}
+                      disabled={index === 0}
+                      className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded disabled:opacity-30"
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMove(index, 'down')}
+                      disabled={index === activeSources.length - 1}
+                      className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded disabled:opacity-30"
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(source.id)}
+                      className="p-1 hover:bg-red-100 text-slate-400 hover:text-red-500 rounded ml-1"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs italic p-4">
+                <span>暂无启用的源</span>
+                <span>请从右侧添加</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Available List */}
+        <div className="space-y-2">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
+            <span>可用插件</span>
+            <span className="text-slate-400">{availableSources.length}</span>
+          </div>
+          <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 min-h-[120px] p-2 space-y-2">
+            {availableSources.length > 0 ? (
+              availableSources.map(source => (
+                <button
+                  key={source.id}
+                  type="button"
+                  onClick={() => handleAdd(source.id)}
+                  className="w-full flex items-center justify-between p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-md group text-left transition-colors"
+                >
+                  <span className="text-sm font-medium truncate dark:text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200">{source.name}</span>
+                  <Plus size={16} className="text-primary-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              ))
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-400 text-xs italic p-4">
+                {sources.length === 0 ? '未检测到插件' : '已全部添加'}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      <p className="text-[10px] text-slate-400 mt-3">
+        提示：系统将按照列表顺序依次尝试获取信息。如果是“默认”配置，将应用于所有未单独配置的字段。
+      </p>
+    </div>
+  );
+};
 
 const AdminLibraries: React.FC = () => {
   const [libraries, setLibraries] = useState<Library[]>([]);
@@ -24,6 +227,8 @@ const AdminLibraries: React.FC = () => {
   const [availableFolders, setAvailableFolders] = useState<{name: string, path: string}[]>([]);
   const [currentBrowsePath, setCurrentBrowsePath] = useState('');
   const [isFolderMenuOpen, setIsFolderMenuOpen] = useState(false);
+  const [scraperSources, setScraperSources] = useState<{id: string, name: string}[]>([]);
+  const [showJsonEditor, setShowJsonEditor] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -32,12 +237,25 @@ const AdminLibraries: React.FC = () => {
     url: '',
     username: '',
     password: '',
-    root_path: '/'
+    rootPath: '/',
+    scraperConfig: ''
   });
 
   useEffect(() => {
     fetchLibraries();
+    fetchScraperSources();
   }, []);
+
+  const fetchScraperSources = async () => {
+    try {
+      const response = await apiClient.get('/api/scraper/sources');
+      if (response.data && response.data.sources) {
+        setScraperSources(response.data.sources);
+      }
+    } catch (err) {
+      console.error('Failed to fetch scraper sources', err);
+    }
+  };
 
   useEffect(() => {
     if (isModalOpen && formData.type === 'local') {
@@ -67,13 +285,29 @@ const AdminLibraries: React.FC = () => {
 
   const openEditModal = (lib: Library) => {
     setEditingId(lib.id);
+    
+    // Determine the type safely
+    const libType = lib.libraryType === 'local' ? 'local' : 'webdav';
+    
+    // Handle scraper config - check if it's already a string or an object
+    let scraperConfigStr = '';
+    const configData = lib.scraperConfig;
+    if (configData) {
+      if (typeof configData === 'string') {
+        scraperConfigStr = configData;
+      } else {
+        scraperConfigStr = JSON.stringify(configData, null, 2);
+      }
+    }
+
     setFormData({
       name: lib.name,
-      type: lib.type || 'webdav',
+      type: libType,
       url: lib.url,
       username: lib.username || '',
-      password: lib.password || '',
-      root_path: lib.root_path
+      password: '', // Don't populate password for security, let user enter new one if needed
+      rootPath: lib.rootPath || '/',
+      scraperConfig: scraperConfigStr
     });
     setIsModalOpen(true);
   };
@@ -81,25 +315,50 @@ const AdminLibraries: React.FC = () => {
   const handleSaveLibrary = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const payload: any = {
+        name: formData.name,
+        libraryType: formData.type,
+      };
+
+      if (formData.type === 'local') {
+        payload.path = formData.url;
+      } else {
+        payload.webdavUrl = formData.url;
+        payload.webdavUsername = formData.username;
+        if (formData.password || !editingId) {
+             payload.webdavPassword = formData.password;
+        }
+        payload.rootPath = formData.rootPath;
+      }
+
+      if (formData.scraperConfig) {
+        try {
+          payload.scraperConfig = JSON.parse(formData.scraperConfig);
+        } catch (e) {
+          alert('刮削源配置 JSON 格式错误');
+          return;
+        }
+      }
+
       let savedLibId = editingId;
       if (editingId) {
-        await apiClient.patch(`/api/libraries/${editingId}`, formData);
+        await apiClient.patch(`/api/libraries/${editingId}`, payload);
       } else {
-        const res = await apiClient.post('/api/libraries', formData);
+        const res = await apiClient.post('/api/libraries', payload);
         if (res.data && res.data.id) {
             savedLibId = res.data.id;
         }
       }
       setIsModalOpen(false);
       setEditingId(null);
-      setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', root_path: '/' });
+      setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', rootPath: '/', scraperConfig: '' });
       await fetchLibraries();
       
-      // Automatically trigger scan after save
-      if (savedLibId) {
-        handleScan(savedLibId, true);
-      }
-    } catch {
+      // Note: Scanning is now automatically triggered by the backend upon creation.
+      // We only manually trigger it here if it's an edit operation or if we want to force it,
+      // but for creation, the backend handles it to avoid duplicate tasks.
+    } catch (err) {
+      console.error(err);
       alert(editingId ? '修改失败，请检查配置' : '添加失败，请检查配置');
     }
   };
@@ -111,7 +370,7 @@ const AdminLibraries: React.FC = () => {
       if (!silent) {
         alert('扫描任务已启动');
       }
-    } catch {
+    } catch (err) {
       if (!silent) {
         alert('扫描启动失败');
       }
@@ -125,7 +384,7 @@ const AdminLibraries: React.FC = () => {
       await apiClient.delete(`/api/libraries/${id}`);
       setDeleteConfirmId(null);
       fetchLibraries();
-    } catch {
+    } catch (err) {
       alert('删除失败');
     }
   };
@@ -144,7 +403,7 @@ const AdminLibraries: React.FC = () => {
           <button 
             onClick={() => {
               setEditingId(null);
-              setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', root_path: '/' });
+              setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', rootPath: '/', scraperConfig: '' });
               setIsModalOpen(true);
             }}
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all text-sm md:text-base"
@@ -166,15 +425,15 @@ const AdminLibraries: React.FC = () => {
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-xl font-bold dark:text-white truncate">{lib.name}</h3>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
-                    lib.type === 'local' 
+                    lib.libraryType === 'local' 
                       ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400' 
                       : 'bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
                   }`}>
-                    {lib.type === 'local' ? '本地存储' : 'WebDAV'}
+                    {lib.libraryType === 'local' ? '本地存储' : 'WebDAV'}
                   </span>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-1">
-                  {lib.type !== 'local' && (
+                  {lib.libraryType !== 'local' && (
                     <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
                       <Globe size={14} className="shrink-0" />
                       <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.url}>{lib.url}</span>
@@ -182,8 +441,8 @@ const AdminLibraries: React.FC = () => {
                   )}
                   <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
                     <Folder size={14} className="shrink-0" />
-                    <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.type === 'local' ? lib.url : lib.root_path}>
-                      {lib.type === 'local' ? lib.url : lib.root_path}
+                    <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.libraryType === 'local' ? lib.url : lib.rootPath}>
+                      {lib.libraryType === 'local' ? lib.url : lib.rootPath}
                     </span>
                   </div>
                 </div>
@@ -268,23 +527,25 @@ const AdminLibraries: React.FC = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setFormData({...formData, type: 'webdav'})}
+                      disabled={!!editingId}
+                      onClick={() => setFormData({...formData, type: 'webdav', url: '', rootPath: '/'})}
                       className={`py-2.5 rounded-xl font-bold transition-all border ${
                         formData.type === 'webdav' 
                           ? 'bg-primary-50 border-primary-200 text-primary-600' 
                           : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400'
-                      }`}
+                      } ${editingId ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       WebDAV
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFormData({...formData, type: 'local'})}
+                      disabled={!!editingId}
+                      onClick={() => setFormData({...formData, type: 'local', url: '', rootPath: '/'})}
                       className={`py-2.5 rounded-xl font-bold transition-all border ${
                         formData.type === 'local' 
                           ? 'bg-primary-50 border-primary-200 text-primary-600' 
                           : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400'
-                      }`}
+                      } ${editingId ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       本地存储
                     </button>
@@ -331,9 +592,10 @@ const AdminLibraries: React.FC = () => {
                         <label className="text-sm font-bold text-slate-600 dark:text-slate-400">密码</label>
                         <input 
                           type="password" 
-                          required
+                          required={!editingId}
                           value={formData.password}
                           onChange={e => setFormData({...formData, password: e.target.value})}
+                          placeholder={editingId ? "不修改请留空" : ""}
                           className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                         />
                       </div>
@@ -342,8 +604,8 @@ const AdminLibraries: React.FC = () => {
                       <label className="text-sm font-bold text-slate-600 dark:text-slate-400">根目录</label>
                       <input 
                         type="text" 
-                        value={formData.root_path}
-                        onChange={e => setFormData({...formData, root_path: e.target.value})}
+                        value={formData.rootPath}
+                        onChange={e => setFormData({...formData, rootPath: e.target.value})}
                         placeholder="/"
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                       />
@@ -406,7 +668,7 @@ const AdminLibraries: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setFormData({...formData, url: currentBrowsePath, root_path: '/'});
+                                  setFormData({...formData, url: currentBrowsePath, rootPath: '/'});
                                   setIsFolderMenuOpen(false);
                                 }}
                                 className="flex-1 py-2 bg-primary-600 text-white text-xs font-bold rounded-xl hover:bg-primary-700 shadow-lg shadow-primary-500/20 transition-all flex items-center justify-center gap-2"
@@ -461,6 +723,40 @@ const AdminLibraries: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                <div className="space-y-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-bold text-slate-600 dark:text-slate-400">刮削源配置</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowJsonEditor(!showJsonEditor)}
+                      className="text-xs text-primary-600 font-bold hover:underline"
+                    >
+                      {showJsonEditor ? '切换至简易模式' : '切换至高级模式 (JSON)'}
+                    </button>
+                  </div>
+
+                  {!showJsonEditor ? (
+                    <ScraperConfigurator 
+                      configStr={formData.scraperConfig}
+                      sources={scraperSources}
+                      onChange={(newConfigStr) => setFormData({...formData, scraperConfig: newConfigStr})}
+                      libraryType={formData.type}
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      <textarea 
+                        value={formData.scraperConfig}
+                        onChange={e => setFormData({...formData, scraperConfig: e.target.value})}
+                        placeholder='{"defaultSources": ["xiimalaya-scraper-js"]}'
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white font-mono text-sm h-32"
+                      />
+                      <p className="text-xs text-slate-400">
+                        可选配置：defaultSources, titleSources, coverSources, introSources 等。
+                      </p>
+                    </div>
+                  )}
+                </div>
 
                 <div className="flex gap-4 pt-6">
                   <button 
