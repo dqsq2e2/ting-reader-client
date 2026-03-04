@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import apiClient from '../api/client';
 import type { ScrapeDiff, ChapterChange, BookMetadata } from '../types';
-import { X, Save, ArrowRight, Check, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
+import { X, Save, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 
 interface Props {
   bookId: string;
@@ -15,10 +15,11 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
   const [saving, setSaving] = useState(false);
   const [selectedChanges, setSelectedChanges] = useState<Set<number>>(new Set());
   
-  const [libraryId, setLibraryId] = useState<string>("");
+  // const [libraryId, setLibraryId] = useState<string>("");
 
   useEffect(() => {
     fetchDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookId]);
 
   const fetchDiff = async () => {
@@ -27,9 +28,9 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       
       const bookRes = await apiClient.get(`/api/books/${bookId}`);
       const bookTitle = bookRes.data.title;
-      if (bookRes.data.libraryId) {
-          setLibraryId(bookRes.data.libraryId);
-      }
+      // if (bookRes.data.libraryId) {
+      //    setLibraryId(bookRes.data.libraryId);
+      // }
       
       const res = await apiClient.post(`/api/books/${bookId}/scrape-diff`, {
         query: bookTitle
@@ -38,7 +39,8 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       const data = res.data;
 
       // Normalize snake_case from API to camelCase for local state
-      const normalizeMetadata = (m: any): BookMetadata => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const normalizeMetadata = (m: Record<string, any>): BookMetadata => ({
           title: m.title,
           author: m.author,
           narrator: m.narrator,
@@ -47,7 +49,8 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
           tags: m.tags
       });
       
-      const normalizeChanges = (changes: any[]): ChapterChange[] => (changes || []).map((c: any) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const normalizeChanges = (changes: Record<string, any>[]): ChapterChange[] => (changes || []).map((c: Record<string, any>) => ({
           index: c.index,
           currentTitle: c.currentTitle || c.current_title,
           scrapedTitle: c.scrapedTitle || c.scraped_title,
@@ -82,7 +85,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     }
   };
 
-  const [imageError, setImageError] = useState<Record<string, boolean>>({});
+  // const [imageError, setImageError] = useState<Record<string, boolean>>({});
 
   const cleanUrl = (url?: string) => {
     if (!url) return '';
@@ -107,13 +110,15 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     return cleaned.trim();
   };
 
+  /*
   const handleImageError = (type: 'current' | 'scraped') => {
     setImageError(prev => ({ ...prev, [type]: true }));
   };
+  */
 
   useEffect(() => {
     // Reset image errors when diff changes
-    setImageError({});
+    // setImageError({});
   }, [diff]);
 
   const handleApply = async () => {
@@ -153,6 +158,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     }
   };
 
+  /*
   const toggleChange = (index: number) => {
     const newSelected = new Set(selectedChanges);
     if (newSelected.has(index)) {
@@ -162,6 +168,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     }
     setSelectedChanges(newSelected);
   };
+  */
 
   if (loading) {
     return (

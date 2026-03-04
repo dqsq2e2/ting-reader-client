@@ -102,10 +102,10 @@ const LoginPage: React.FC = () => {
           // We need to retry the POST request to the NEW location if we detected a redirect but got 404/Method Not Allowed.
           // OR, we can try to pre-resolve the redirect with a HEAD/GET request first.
           
-          if (fetchResponse.status === 404 && fetchResponse.redirected) {
+          if ((fetchResponse.status === 404 || fetchResponse.status === 405) && fetchResponse.redirected) {
                // The redirect happened, but browser changed POST to GET.
                // Let's retry POST to the new URL.
-               console.log('Redirect turned POST into GET (404). Retrying POST to new URL:', fetchResponse.url);
+               console.log('Redirect turned POST into GET (404/405). Retrying POST to new URL:', fetchResponse.url);
                const retryResponse = await fetch(fetchResponse.url, {
                   method: 'POST',
                   headers: {

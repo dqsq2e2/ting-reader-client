@@ -18,7 +18,7 @@ const BookSelector: React.FC<Props> = ({ onSelect, onClose, currentBookId }) => 
     const fetchBooks = async () => {
       setLoading(true);
       try {
-        const params: any = { search };
+        const params: Record<string, string> = { search };
         const res = await apiClient.get('/api/books', { params });
         let list: Book[] = res.data;
         if (currentBookId) {

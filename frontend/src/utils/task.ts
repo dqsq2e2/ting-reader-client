@@ -1,9 +1,10 @@
 interface TaskPayload {
     Custom?: {
         task_type: string;
-        data: any;
+        data: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
     };
     libraryId?: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [key: string]: any;
 }
 

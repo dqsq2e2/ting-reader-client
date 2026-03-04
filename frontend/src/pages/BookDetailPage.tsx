@@ -72,6 +72,7 @@ const BookDetailPage: React.FC = () => {
   const [genFilename, setGenFilename] = useState('');
   const [genNum, setGenNum] = useState('');
   const [genTitle, setGenTitle] = useState('');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [genResult, setGenResult] = useState<any>(null);
 
   const handleGenerateRegex = async () => {
@@ -83,7 +84,7 @@ const BookDetailPage: React.FC = () => {
         chapter_title: genTitle
       });
       setGenResult(res.data);
-    } catch (e) {
+    } catch {
       alert('生成失败');
     }
   };
@@ -392,7 +393,8 @@ const BookDetailPage: React.FC = () => {
         dataToSave.themeColor = undefined; // Will be handled by COALESCE or we can pass null
       }
       
-      const payload: any = { ...dataToSave };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: Record<string, any> = { ...dataToSave };
       await apiClient.patch(`/api/books/${id}`, payload);
       
       // If chapterRegex changed, trigger a re-scan of this book
@@ -403,7 +405,7 @@ const BookDetailPage: React.FC = () => {
 
       setBook({ ...book!, ...dataToSave });
       setIsEditModalOpen(false);
-    } catch (err) {
+    } catch {
       alert('保存失败');
     }
   };
