@@ -54,6 +54,7 @@ const ScraperConfigurator = ({
   const activeIds: string[] = config[currentKey] || [];
   // Use camelCase first (as API transforms it), then fallback to snake_case (though normalized above, just in case)
   const nfoEnabled = config.nfoWritingEnabled !== undefined ? config.nfoWritingEnabled : (config.nfo_writing_enabled || false);
+  const preferAudioTitle = config.preferAudioTitle !== undefined ? config.preferAudioTitle : (config.prefer_audio_title || false);
 
   const handleNfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       // Always save as camelCase to match API expectations if we want to be consistent,
@@ -64,6 +65,12 @@ const ScraperConfigurator = ({
       delete newConfig.nfo_writing_enabled;
       
       onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handlePreferAudioTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newConfig = { ...config, preferAudioTitle: e.target.checked, prefer_audio_title: undefined };
+    delete newConfig.prefer_audio_title;
+    onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleAdd = (sourceId: string) => {
@@ -96,6 +103,25 @@ const ScraperConfigurator = ({
 
   return (
     <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+      {/* Prefer Audio Title Toggle */}
+      <div className="flex items-center gap-3 mb-4 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+        <input 
+          type="checkbox" 
+          id="prefer-audio-title" 
+          checked={preferAudioTitle} 
+          onChange={handlePreferAudioTitleChange}
+          className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
+        />
+        <div className="flex flex-col">
+          <label htmlFor="prefer-audio-title" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+            优先使用音频 ID3 标题
+          </label>
+          <span className="text-[10px] text-slate-400">
+            开启后，如果检测到 ID3 标签中的专辑标题，将优先使用该标题而不是目录名
+          </span>
+        </div>
+      </div>
+
       {/* NFO Toggle - Only show for local libraries */}
       {libraryType === 'local' && (
         <div className="flex items-center gap-3 mb-4 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
