@@ -6,10 +6,10 @@ import { Search, X, Book as BookIcon, Loader2 } from 'lucide-react';
 interface Props {
   onSelect: (book: Book) => void;
   onClose: () => void;
-  currentBookId?: string; // Exclude current book from list
+  excludeIds?: string[];
 }
 
-const BookSelector: React.FC<Props> = ({ onSelect, onClose, currentBookId }) => {
+const BookSelector: React.FC<Props> = ({ onSelect, onClose, excludeIds }) => {
   const [search, setSearch] = useState('');
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(false);
@@ -18,11 +18,12 @@ const BookSelector: React.FC<Props> = ({ onSelect, onClose, currentBookId }) => 
     const fetchBooks = async () => {
       setLoading(true);
       try {
-        const params: Record<string, string> = { search };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const params: Record<string, any> = { search };
         const res = await apiClient.get('/api/books', { params });
         let list: Book[] = res.data;
-        if (currentBookId) {
-            list = list.filter(b => b.id !== currentBookId);
+        if (excludeIds && excludeIds.length > 0) {
+            list = list.filter(b => !excludeIds.includes(b.id));
         }
         setBooks(list);
       } catch (err) {
@@ -34,7 +35,8 @@ const BookSelector: React.FC<Props> = ({ onSelect, onClose, currentBookId }) => 
 
     const timer = setTimeout(fetchBooks, 300);
     return () => clearTimeout(timer);
-  }, [search, currentBookId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, JSON.stringify(excludeIds)]);
 
   return (
     <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">

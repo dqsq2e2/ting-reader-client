@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../api/client';
-import type { ScrapeDiff, ChapterChange, BookMetadata } from '../types';
+import type { ScrapeDiff, ChapterChange } from '../types';
 import { X, Save, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -15,64 +15,51 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
   const [saving, setSaving] = useState(false);
   const [selectedChanges, setSelectedChanges] = useState<Set<number>>(new Set());
   
+  // We need to know the libraryId to use the proxy correctly if needed.
+  // Ideally, this should be passed as a prop, but for now we can try to infer it 
+  // or fetch it. Since we only have bookId, we might need to fetch the book details first.
   // const [libraryId, setLibraryId] = useState<string>("");
 
-  useEffect(() => {
-    fetchDiff();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookId]);
-
-  const fetchDiff = async () => {
+  const fetchDiff = useCallback(async () => {
     try {
       setLoading(true);
       
+      // Fetch current book details to get the title AND library_id
       const bookRes = await apiClient.get(`/api/books/${bookId}`);
       const bookTitle = bookRes.data.title;
-      // if (bookRes.data.libraryId) {
-      //    setLibraryId(bookRes.data.libraryId);
+      // if (bookRes.data.library_id) {
+      //    setLibraryId(bookRes.data.library_id);
       // }
       
       const res = await apiClient.post(`/api/books/${bookId}/scrape-diff`, {
-        query: bookTitle
+        query: bookTitle,
+        author: bookRes.data.author,
+        narrator: bookRes.data.narrator
       });
 
-      const data = res.data;
-
-      // Normalize snake_case from API to camelCase for local state
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const normalizeMetadata = (m: Record<string, any>): BookMetadata => ({
-          title: m.title,
-          author: m.author,
-          narrator: m.narrator,
-          description: m.description,
-          coverUrl: m.coverUrl || m.cover_url,
-          tags: m.tags
-      });
-      
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const normalizeChanges = (changes: Record<string, any>[]): ChapterChange[] => (changes || []).map((c: Record<string, any>) => ({
-          index: c.index,
-          currentTitle: c.currentTitle || c.current_title,
-          scrapedTitle: c.scrapedTitle || c.scraped_title,
-          status: c.status
-      }));
-
-      const normalizedDiff: ScrapeDiff = {
-          current: normalizeMetadata(data.current),
-          scraped: normalizeMetadata(data.scraped),
-          chapterChanges: normalizeChanges(data.chapterChanges || data.chapter_changes)
-      };
-
-      // Clean cover URL
-      if (normalizedDiff.scraped.coverUrl) {
-          normalizedDiff.scraped.coverUrl = cleanUrl(normalizedDiff.scraped.coverUrl);
+      // Fix camelCase vs snake_case issue if needed
+      if (res.data.scraped) {
+          if (res.data.scraped.coverUrl && !res.data.scraped.cover_url) {
+              res.data.scraped.cover_url = res.data.scraped.coverUrl;
+          }
+          if (res.data.scraped.chapterChanges && !res.data.scraped.chapter_changes) {
+              res.data.scraped.chapter_changes = res.data.scraped.chapterChanges;
+          }
+          if (res.data.chapterChanges && !res.data.chapter_changes) {
+              res.data.chapter_changes = res.data.chapterChanges;
+          }
+          
+          // Ensure URL is clean
+          if (res.data.scraped.cover_url) {
+              res.data.scraped.cover_url = String(res.data.scraped.cover_url).replace(/[`\s]/g, '').trim();
+          }
       }
 
-      setDiff(normalizedDiff);
-      
+      setDiff(res.data);
       // Default select all "update" and "new" changes
       const initialSelected = new Set<number>();
-      normalizedDiff.chapterChanges.forEach((c) => {
+      const changes = res.data.chapter_changes || [];
+      changes.forEach((c: ChapterChange) => {
         if (c.status === 'update' || c.status === 'new') {
           initialSelected.add(c.index);
         }
@@ -80,10 +67,15 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       setSelectedChanges(initialSelected);
     } catch (err) {
       console.error('Failed to fetch scrape diff', err);
+      // alert('获取元数据失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [bookId]);
+
+  useEffect(() => {
+    fetchDiff();
+  }, [fetchDiff]);
 
   // const [imageError, setImageError] = useState<Record<string, boolean>>({});
 
@@ -116,10 +108,12 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
   };
   */
 
+  /*
   useEffect(() => {
     // Reset image errors when diff changes
     // setImageError({});
   }, [diff]);
+  */
 
   const handleApply = async () => {
     if (!diff) return;
@@ -127,16 +121,12 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       setSaving(true);
       
       // Construct metadata matching BookDetail structure
-      // We map back to what the API expects (which might be snake_case for this specific endpoint)
-      // or camelCase if updated. Let's send camelCase and assume backend handles it, 
-      // or send snake_case to be safe if we haven't checked backend.
-      // Based on previous code, it was sending `cover_url` and `intro`.
       const metadata = {
         id: '', // Not used for update
         title: diff.scraped.title,
         author: diff.scraped.author,
         narrator: diff.scraped.narrator || null,
-        cover_url: diff.scraped.coverUrl || null,
+        cover_url: cleanUrl(diff.scraped.cover_url) || null,
         intro: diff.scraped.description,
         tags: diff.scraped.tags || [],
         chapter_count: 0, // Not used for update
@@ -220,9 +210,9 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
               {/* Cover Image */}
               <div className="shrink-0">
                 <div className="w-32 h-48 rounded-xl overflow-hidden shadow-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 relative group">
-                  {diff.scraped.coverUrl ? (
+                  {diff.scraped.cover_url ? (
                       <img 
-                        src={diff.scraped.coverUrl} 
+                        src={diff.scraped.cover_url} 
                         className="w-full h-full object-cover" 
                         alt="Cover"
                         referrerPolicy="no-referrer"

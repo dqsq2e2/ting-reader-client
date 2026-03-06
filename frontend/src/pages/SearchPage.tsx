@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import apiClient from '../api/client';
-import type { Book, Library } from '../types';
+import type { Book, Library, Series } from '../types';
 import BookCard from '../components/BookCard';
 import { Search as SearchIcon, Loader2, BookX, ChevronLeft, ChevronRight, SlidersHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
@@ -10,6 +10,7 @@ const SearchPage: React.FC = () => {
   
   // Filter states
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>('');
+  const [selectedSeries, setSelectedSeries] = useState<string>('');
   const [selectedTag, setSelectedTag] = useState<string>('');
   const [selectedAuthor, setSelectedAuthor] = useState<string>('');
   const [selectedNarrator, setSelectedNarrator] = useState<string>('');
@@ -17,6 +18,7 @@ const SearchPage: React.FC = () => {
   
   // Data options
   const [libraries, setLibraries] = useState<Library[]>([]);
+  const [allSeries, setAllSeries] = useState<Series[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [allAuthors, setAllAuthors] = useState<string[]>([]);
   const [allNarrators, setAllNarrators] = useState<string[]>([]);
@@ -29,6 +31,7 @@ const SearchPage: React.FC = () => {
   // Scroll refs for filter rows
   const filterRowRefs = {
     libraries: useRef<HTMLDivElement>(null),
+    series: useRef<HTMLDivElement>(null),
     tags: useRef<HTMLDivElement>(null),
     authors: useRef<HTMLDivElement>(null),
     narrators: useRef<HTMLDivElement>(null),
@@ -55,14 +58,16 @@ const SearchPage: React.FC = () => {
   useEffect(() => {
     const fetchMetadata = async () => {
       try {
-        const [tagsRes, booksRes, libsRes] = await Promise.all([
+        const [tagsRes, booksRes, libsRes, seriesRes] = await Promise.all([
           apiClient.get('/api/tags'),
           apiClient.get('/api/books'),
-          apiClient.get('/api/libraries')
+          apiClient.get('/api/libraries'),
+          apiClient.get('/api/v1/series')
         ]);
         
         setAllTags(tagsRes.data);
         setLibraries(libsRes.data);
+        setAllSeries(seriesRes.data);
         
         // Extract unique authors and narrators
         const books = booksRes.data as Book[];
@@ -87,17 +92,18 @@ const SearchPage: React.FC = () => {
   useEffect(() => {
     const searchBooks = async () => {
       // If no filters are active, clear results
-      if (!debouncedQuery.trim() && !selectedTag && !selectedAuthor && !selectedNarrator && !selectedLibraryId) {
+      if (!debouncedQuery.trim() && !selectedTag && !selectedAuthor && !selectedNarrator && !selectedLibraryId && !selectedSeries) {
         setResults([]);
         return;
       }
 
       setLoading(true);
       try {
-        const params: Record<string, string> = {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const params: Record<string, any> = {};
         if (debouncedQuery.trim()) params.search = debouncedQuery;
         if (selectedTag) params.tag = selectedTag;
-        if (selectedLibraryId) params.library_id = selectedLibraryId;
+        if (selectedLibraryId) params.libraryId = selectedLibraryId;
         
         const response = await apiClient.get('/api/books', { params });
         let filtered = response.data as Book[];
@@ -110,6 +116,16 @@ const SearchPage: React.FC = () => {
         if (selectedNarrator) {
           filtered = filtered.filter(b => b.narrator === selectedNarrator);
         }
+
+        if (selectedSeries) {
+           const series = allSeries.find(s => s.id === selectedSeries);
+           if (series?.books) {
+               const seriesBookIds = new Set(series.books.map(b => b.id));
+               filtered = filtered.filter(b => seriesBookIds.has(b.id));
+           } else {
+               filtered = [];
+           }
+        }
         
         setResults(filtered);
       } catch (err) {
@@ -120,7 +136,7 @@ const SearchPage: React.FC = () => {
     };
 
     searchBooks();
-  }, [debouncedQuery, selectedTag, selectedAuthor, selectedNarrator, selectedLibraryId]);
+  }, [debouncedQuery, selectedTag, selectedAuthor, selectedNarrator, selectedLibraryId, selectedSeries, allSeries]);
 
   // Filter Row Component
   const FilterRow = ({ 
@@ -139,21 +155,22 @@ const SearchPage: React.FC = () => {
     const [canScrollLeft, setCanScrollLeft] = useState(false);
     const [canScrollRight, setCanScrollRight] = useState(false);
 
-    const checkScroll = useCallback(() => {
+    const checkScroll = () => {
       if (scrollRef.current) {
         const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
         setCanScrollLeft(scrollLeft > 0);
         setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 1); // -1 buffer
       }
-    }, [scrollRef]);
+    };
 
     useEffect(() => {
       checkScroll();
       window.addEventListener('resize', checkScroll);
       return () => window.removeEventListener('resize', checkScroll);
-    }, [items, checkScroll]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [items]);
 
-    if (items.length === 0) return null;
+    if (!items || items.length === 0) return null;
 
     return (
       <div className="flex flex-row items-center gap-3 sm:gap-6 py-1">
@@ -219,7 +236,7 @@ const SearchPage: React.FC = () => {
     );
   };
 
-  const hasActiveFilters = selectedLibraryId || selectedTag || selectedAuthor || selectedNarrator;
+  const hasActiveFilters = selectedLibraryId || selectedTag || selectedAuthor || selectedNarrator || selectedSeries;
 
   return (
     <div className="w-full max-w-screen-2xl mx-auto p-4 sm:p-6 md:p-8 lg:p-10 space-y-6">
@@ -281,6 +298,13 @@ const SearchPage: React.FC = () => {
                 selected={selectedLibraryId} 
                 onSelect={setSelectedLibraryId} 
                 scrollRef={filterRowRefs.libraries}
+              />
+              <FilterRow 
+                label="系列" 
+                items={allSeries.map(s => ({ id: s.id, name: s.title }))} 
+                selected={selectedSeries} 
+                onSelect={setSelectedSeries} 
+                scrollRef={filterRowRefs.series}
               />
               <FilterRow 
                 label="标签" 
