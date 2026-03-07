@@ -7,6 +7,7 @@ import SeriesCard from '../components/SeriesCard';
 import SeriesModal from '../components/SeriesModal';
 import { Search, Filter, Database, Plus, Library as LibraryIcon, Layers, Check, X } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
+import { getPinyinInitial } from '../utils/pinyin';
 
 const BookshelfPage: React.FC = () => {
   const currentChapter = usePlayerStore((state) => state.currentChapter);
@@ -20,6 +21,10 @@ const BookshelfPage: React.FC = () => {
   const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  
+  // Alphabet Index State
+  const [activeLetter, setActiveLetter] = useState<string | null>(null);
+  const [isTouchingIndex, setIsTouchingIndex] = useState(false);
   
   // Selection mode for creating series
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -130,6 +135,82 @@ const BookshelfPage: React.FC = () => {
     }
   };
 
+  // Group items by first letter if sorting by title or author
+  const groupedItems = React.useMemo(() => {
+    if (sortBy === 'createdAt') return null;
+
+    const groups: Record<string, (Book | Series)[]> = {};
+    const otherKey = '#';
+
+    // Process books
+    filteredBooks.forEach(book => {
+      let key = '';
+      if (sortBy === 'title') {
+        key = getPinyinInitial(book.title);
+      } else if (sortBy === 'author') {
+        key = getPinyinInitial(book.author || '');
+      }
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(book);
+    });
+
+    // Process series
+    filteredSeries.forEach(series => {
+      let key = '';
+      if (sortBy === 'title') {
+        key = getPinyinInitial(series.title);
+      } else if (sortBy === 'author') {
+        key = getPinyinInitial(series.author || '');
+      }
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(series);
+    });
+
+    // Sort items within each group
+    Object.keys(groups).forEach(key => {
+      groups[key].sort((a, b) => {
+        if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
+        if (sortBy === 'author') return (a.author || '').localeCompare(b.author || '', 'zh-CN');
+        return 0;
+      });
+    });
+
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+        if (a === otherKey) return 1;
+        if (b === otherKey) return -1;
+        return a.localeCompare(b);
+    });
+
+    return { groups, sortedKeys };
+  }, [filteredBooks, filteredSeries, sortBy]);
+
+  const scrollToGroup = (key: string) => {
+    setActiveLetter(key);
+    const element = document.getElementById(`group-${key}`);
+    const container = document.getElementById('main-content');
+    
+    if (element && container) {
+      const containerRect = container.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      const offset = elementRect.top - containerRect.top + container.scrollTop;
+      
+      // Mobile header height (64px) + padding or Desktop padding
+      const headerOffset = window.innerWidth < 1280 ? 80 : 20;
+      
+      container.scrollTo({ top: offset - headerOffset, behavior: 'auto' });
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+    const key = element?.getAttribute('data-key');
+    if (key && key !== activeLetter) {
+      scrollToGroup(key);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center min-h-full">
@@ -142,7 +223,7 @@ const BookshelfPage: React.FC = () => {
   return (
     <div className="flex-1 min-h-full flex flex-col p-4 sm:p-6 md:p-8">
       <div className="flex-1 space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
+        <div className="flex flex-col min-[880px]:flex-row min-[880px]:items-center justify-between gap-4 mb-2">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
               <LibraryIcon className="text-primary-600" />
@@ -151,7 +232,7 @@ const BookshelfPage: React.FC = () => {
             <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">发现您收藏的所有有声读物。</p>
           </div>
           
-          <div className="flex flex-wrap min-[550px]:flex-nowrap items-center gap-2 sm:gap-3 w-full md:w-auto justify-end">
+          <div className="flex flex-wrap min-[550px]:flex-nowrap items-center gap-2 sm:gap-3 w-full min-[880px]:w-auto justify-end">
             {isSelectionMode ? (
               <div className="flex items-center gap-2 order-1">
                 <span className="text-sm font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap hidden sm:inline">
@@ -283,36 +364,123 @@ const BookshelfPage: React.FC = () => {
 
       {books.length > 0 || series.length > 0 ? (
         <>
-          <div className={`grid ${getGridCols()}`}>
-            {/* Show Series first */}
-            {!isSelectionMode && filteredSeries.map((s) => (
-              <SeriesCard key={s.id} series={s} />
-            ))}
-            
-            {/* Show Books */}
-            {filteredBooks.map((book) => (
-              <div key={book.id} className="relative">
-                {isSelectionMode ? (
-                  <>
-                    <div className={`absolute top-2 right-2 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all pointer-events-none ${selectedBookIds.includes(book.id) ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white/80 dark:bg-slate-900/80 border-slate-300 dark:border-slate-600'}`}>
-                      {selectedBookIds.includes(book.id) && <Check size={14} />}
-                    </div>
-                    <div className={`transition-opacity duration-200 ${selectedBookIds.includes(book.id) ? 'opacity-100' : 'opacity-60 grayscale-[0.5]'}`}>
-                      <BookCard 
-                        book={book} 
-                        disableLink 
-                        onClick={() => toggleBookSelection(book.id)} 
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <BookCard book={book} />
-                )}
+          {/* Alphabet Scroll Bar */}
+          {groupedItems && (
+            <>
+              {/* Central Big Letter Overlay */}
+              {isTouchingIndex && activeLetter && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+                  <div className="w-20 h-20 bg-slate-900/50 backdrop-blur-sm rounded-xl flex items-center justify-center text-4xl font-bold text-white shadow-xl">
+                    {activeLetter}
+                  </div>
+                </div>
+              )}
+              
+              <div 
+                className="fixed right-1 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center bg-transparent py-2 select-none touch-none"
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  setIsTouchingIndex(true);
+                }}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={() => {
+                  setIsTouchingIndex(false);
+                  setTimeout(() => setActiveLetter(null), 1000);
+                }}
+              >
+                {groupedItems.sortedKeys.map(key => (
+                  <button
+                    key={key}
+                    data-key={key}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      scrollToGroup(key);
+                      setIsTouchingIndex(true);
+                      setTimeout(() => {
+                        setIsTouchingIndex(false);
+                        setActiveLetter(null);
+                      }, 500);
+                    }}
+                    className={`w-4 h-4 flex items-center justify-center text-[10px] font-medium transition-all cursor-pointer rounded-full my-[1px]
+                      ${activeLetter === key && isTouchingIndex
+                        ? 'bg-primary-600 text-white scale-125 font-bold shadow-sm' 
+                        : 'text-slate-400 hover:text-primary-600 dark:text-slate-500 dark:hover:text-primary-400'
+                      }`}
+                  >
+                    {key}
+                  </button>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
 
-          {filteredBooks.length === 0 && filteredSeries.length === 0 && (
+          {groupedItems ? (
+             // Grouped Layout
+             <div className="space-y-6">
+               {groupedItems.sortedKeys.map(key => (
+                 <div key={key} id={`group-${key}`}>
+                   <div className="text-xs font-bold text-slate-400 dark:text-slate-500 mb-2 pl-1">
+                      {key}
+                   </div>
+                   <div className={`grid ${getGridCols()}`}>
+                     {groupedItems.groups[key].map(item => (
+                       'books' in item ? (
+                         <SeriesCard key={item.id} series={item as Series} />
+                       ) : (
+                         <div key={item.id} className="relative">
+                            {isSelectionMode ? (
+                              <>
+                                <div className={`absolute top-2 right-2 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all pointer-events-none ${selectedBookIds.includes(item.id) ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white/80 dark:bg-slate-900/80 border-slate-300 dark:border-slate-600'}`}>
+                                  {selectedBookIds.includes(item.id) && <Check size={14} />}
+                                </div>
+                                <div className={`transition-opacity duration-200 ${selectedBookIds.includes(item.id) ? 'opacity-100' : 'opacity-60 grayscale-[0.5]'}`}>
+                                  <BookCard 
+                                    book={item as Book} 
+                                    disableLink 
+                                    onClick={() => toggleBookSelection(item.id)} 
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <BookCard book={item as Book} />
+                            )}
+                         </div>
+                       )
+                     ))}
+                   </div>
+                 </div>
+               ))}
+             </div>
+          ) : (
+            // Default Layout (Recent)
+            <div className={`grid ${getGridCols()}`}>
+              {!isSelectionMode && filteredSeries.map((s) => (
+                <SeriesCard key={s.id} series={s} />
+              ))}
+              {filteredBooks.map((book) => (
+                <div key={book.id} className="relative">
+                  {isSelectionMode ? (
+                    <>
+                      <div className={`absolute top-2 right-2 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all pointer-events-none ${selectedBookIds.includes(book.id) ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white/80 dark:bg-slate-900/80 border-slate-300 dark:border-slate-600'}`}>
+                        {selectedBookIds.includes(book.id) && <Check size={14} />}
+                      </div>
+                      <div className={`transition-opacity duration-200 ${selectedBookIds.includes(book.id) ? 'opacity-100' : 'opacity-60 grayscale-[0.5]'}`}>
+                        <BookCard 
+                          book={book} 
+                          disableLink 
+                          onClick={() => toggleBookSelection(book.id)} 
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <BookCard book={book} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {filteredBooks.length === 0 && (filteredSeries.length === 0 || (isSelectionMode && sortBy === 'createdAt')) && (
             <div className="py-20 text-center">
               <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-900 text-slate-400 mb-4">
                 <Search size={40} />
