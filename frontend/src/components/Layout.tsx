@@ -12,7 +12,6 @@ import {
   Database,
   Users,
   Terminal,
-  Download,
   Puzzle
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
@@ -23,12 +22,11 @@ import logoImg from '../assets/logo.png';
 import Player from './Player';
 
 type MenuItem = {
-  icon: React.ReactElement;
-  label: string;
-  path: string;
-  requireAuth?: boolean;
-  onlineOnly?: boolean;
-};
+    icon: React.ReactElement;
+    label: string;
+    path: string;
+    requireAuth?: boolean;
+  };
 
 type NavLinkProps = {
   item: MenuItem;
@@ -137,40 +135,26 @@ const Layout: React.FC = () => {
     refreshTheme();
   }, [refreshTheme]);
 
-  const isOffline = !navigator.onLine;
-
   const menuItems: MenuItem[] = [
-    { icon: <Home size={20} />, label: '首页', path: '/', requireAuth: true, onlineOnly: true },
-    { icon: <Library size={20} />, label: '书架', path: '/bookshelf', requireAuth: true, onlineOnly: true },
-    { icon: <Search size={20} />, label: '搜索', path: '/search', requireAuth: true, onlineOnly: true },
-    { icon: <Heart size={20} />, label: '收藏', path: '/favorites', requireAuth: true, onlineOnly: true },
+    { icon: <Home size={20} />, label: '首页', path: '/', requireAuth: true },
+    { icon: <Library size={20} />, label: '书架', path: '/bookshelf', requireAuth: true },
+    { icon: <Search size={20} />, label: '搜索', path: '/search', requireAuth: true },
+    { icon: <Heart size={20} />, label: '收藏', path: '/favorites', requireAuth: true },
   ].filter(item => {
-      // If offline, hide onlineOnly items
-      if (isOffline && item.onlineOnly) return false;
       // If user is logged in, show all (except offline filtered)
       // If not logged in, only show !requireAuth (none currently)
       return user ? true : !item.requireAuth;
   });
 
-  const cacheItem: MenuItem = { icon: <Download size={20} />, label: '缓存管理', path: '/downloads' };
-
   let managementItems: MenuItem[] = [];
   if (user?.role === 'admin') {
       managementItems = [
-          { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries', onlineOnly: true },
-          cacheItem,
-          { icon: <Puzzle size={20} />, label: '插件管理', path: '/admin/plugins', onlineOnly: true },
-          { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks', onlineOnly: true },
-          { icon: <Users size={20} />, label: '用户管理', path: '/admin/users', onlineOnly: true },
+          { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries' },
+          { icon: <Puzzle size={20} />, label: '插件管理', path: '/admin/plugins' },
+          { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks' },
+          { icon: <Users size={20} />, label: '用户管理', path: '/admin/users' },
       ];
-  } else {
-      managementItems = [cacheItem];
   }
-
-  managementItems = managementItems.filter(item => {
-      if (isOffline && item.onlineOnly) return false;
-      return true;
-  });
 
   const handleLogout = () => {
     logout();
@@ -214,7 +198,6 @@ const Layout: React.FC = () => {
           </div>
 
           <nav className="flex-1 space-y-1 overflow-y-auto custom-scrollbar">
-            {!isOffline && (
             <div className="xl:block hidden">
               {menuItems.length > 0 && (
                   <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4">主菜单</div>
@@ -228,14 +211,11 @@ const Layout: React.FC = () => {
                 />
               ))}
             </div>
-            )}
 
             <div className="xl:mt-8">
-              {!isOffline && (
               <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4 xl:mt-0">
                   {user ? '管理后台' : '更多'}
               </div>
-              )}
               
               {/* Management Items */}
               {managementItems.map((item) => (

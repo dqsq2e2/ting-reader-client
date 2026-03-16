@@ -96,6 +96,21 @@ export interface Plugin {
   successRate?: number;
 }
 
+export interface StorePlugin {
+  id: string;
+  name: string;
+  description: string;
+  longDescription?: string;
+  icon?: string;
+  repo?: string;
+  pluginType: 'scraper' | 'format' | 'utility';
+  version: string;
+  downloadUrl: string | Record<string, string>;
+  size?: string | Record<string, string>;
+  date?: string;
+  dependencies?: string[];
+}
+
 export interface MergeSuggestion {
   id: string;
   sourceBookId: string;
@@ -128,4 +143,14 @@ export interface ScrapeDiff {
   current: BookMetadata;
   scraped: BookMetadata;
   chapterChanges: ChapterChange[];
+}
+
+declare global {
+  interface Window {
+    electronAPI?: {
+      openExternal: (url: string) => Promise<void>;
+      getVersion?: () => Promise<string>;
+      platform?: string;
+    };
+  }
 }

@@ -25,7 +25,8 @@ import {
   AlertTriangle,
   Settings,
   RefreshCw,
-  Wand2
+  Wand2,
+  FileSignature,
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { useAuthStore } from '../store/authStore';
@@ -87,6 +88,19 @@ const BookDetailPage: React.FC = () => {
       setEditData({ ...editData, chapterRegex: genResult.regex });
       setShowRegexGenerator(false);
       setGenResult(null);
+    }
+  };
+
+  const handleWriteMetadata = async () => {
+    try {
+      if (!confirm('确定要将当前元数据写入到音频文件吗？这可能需要一些时间。')) {
+        return;
+      }
+      await apiClient.post(`/api/books/${id}/write-metadata`);
+      alert('已开始后台写入元数据，请稍候查看任务进度。');
+    } catch (err) {
+      console.error('Failed to write metadata', err);
+      alert('写入失败');
     }
   };
 
@@ -171,90 +185,109 @@ const BookDetailPage: React.FC = () => {
     fetchBookDetails();
   }, [id]);
 
-  // Auto-scroll to current chapter logic
-  useEffect(() => {
-    if (hasInitialScrolled.current) return;
-    if (book?.id !== id) return; // Ensure we are looking at the correct book
+  // Find the chapter to resume or highlight
+  const resumeChapter = React.useMemo(() => {
+    if (!book || chapters.length === 0) return null;
 
-    if (book && chapters.length > 0) {
-      let targetChapter = null;
-
-      // 1. Priority: Currently playing chapter if it belongs to this book
-      if (currentChapter && currentChapter.bookId === book.id) {
-        targetChapter = currentChapter;
-      } 
-      // 2. Fallback: Most recently played chapter from history
-      else {
+    // 1. Priority: Currently playing chapter if it belongs to this book
+    if (currentChapter && currentChapter.bookId === book.id) {
+      return currentChapter;
+    } 
+    
+    // 2. Fallback: Most recently played chapter from history
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const playedChapters = [...chapters].filter(c => (c as any).progressUpdatedAt);
+    if (playedChapters.length > 0) {
+      playedChapters.sort((a, b) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const playedChapters = [...chapters].filter(c => (c as any).progressUpdatedAt);
-        if (playedChapters.length > 0) {
-          playedChapters.sort((a, b) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return new Date((b as any).progressUpdatedAt).getTime() - new Date((a as any).progressUpdatedAt).getTime();
-          });
-          targetChapter = playedChapters[0];
-        }
-      }
-
-      if (targetChapter) {
-        setHighlightedChapterId(targetChapter.id);
-        // Determine if target chapter is in main or extra
-        const inMain = mainChapters.find(c => c.id === targetChapter!.id);
-        const inExtra = extraChapters.find(c => c.id === targetChapter!.id);
-        
-        let targetList = currentChapters;
-        
-        if (inMain) {
-          if (activeTab !== 'main') {
-            setActiveTab('main');
-            return; // Wait for tab switch
-          }
-          targetList = mainChapters;
-        } else if (inExtra) {
-          if (activeTab !== 'extra') {
-            setActiveTab('extra');
-            return; // Wait for tab switch
-          }
-          targetList = extraChapters;
-        }
-        
-        // Calculate group index
-        const index = targetList.findIndex(c => c.id === targetChapter.id);
-        if (index !== -1) {
-          const groupIndex = Math.floor(index / chaptersPerGroup);
-          if (currentGroupIndex !== groupIndex) {
-            setCurrentGroupIndex(groupIndex);
-            return; // Wait for group switch
-          }
-          
-          // Scroll into view
-          const timer = setTimeout(() => {
-            const el = document.getElementById(`chapter-${targetChapter!.id}`);
-            if (el) {
-              el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-              hasInitialScrolled.current = true;
-            }
-            
-            const groupTab = document.getElementById(`group-tab-${groupIndex}`);
-            const container = scrollRef.current;
-            if (groupTab && container) {
-              // Manual scroll to center for better compatibility
-              const containerWidth = container.offsetWidth;
-              const tabWidth = groupTab.offsetWidth;
-              const tabLeft = groupTab.offsetLeft;
-              
-              container.scrollTo({
-                left: tabLeft - containerWidth / 2 + tabWidth / 2,
-                behavior: 'smooth'
-              });
-            }
-          }, 300); // Increased timeout to ensure DOM is ready
-          return () => clearTimeout(timer);
-        }
-      }
+        return new Date((b as any).progressUpdatedAt).getTime() - new Date((a as any).progressUpdatedAt).getTime();
+      });
+      return playedChapters[0];
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book?.id, currentChapter?.id, chapters, mainChapters, extraChapters, activeTab, currentGroupIndex, currentChapters, chaptersPerGroup]);
+    return null;
+  }, [book, chapters, currentChapter]);
+
+  // Auto-highlight current chapter logic (without scroll)
+  useEffect(() => {
+    if (book?.id !== id) return; 
+
+    if (resumeChapter) {
+      setHighlightedChapterId(resumeChapter.id);
+    }
+  }, [book?.id, id, resumeChapter]);
+
+  const doScroll = (chapterId: string, groupIndex: number) => {
+      const el = document.getElementById(`chapter-${chapterId}`);
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+      
+      const groupTab = document.getElementById(`group-tab-${groupIndex}`);
+      const container = scrollRef.current;
+      if (groupTab && container) {
+        const containerWidth = container.offsetWidth;
+        const tabWidth = groupTab.offsetWidth;
+        const tabLeft = groupTab.offsetLeft;
+        
+        container.scrollTo({
+          left: tabLeft - containerWidth / 2 + tabWidth / 2,
+          behavior: 'smooth'
+        });
+      }
+  };
+
+  const scrollToChapterElement = (chapterId: string, list: Chapter[]) => {
+      // Calculate group index
+      const index = list.findIndex(c => c.id === chapterId);
+      if (index !== -1) {
+        const groupIndex = Math.floor(index / chaptersPerGroup);
+        if (currentGroupIndex !== groupIndex) {
+          setCurrentGroupIndex(groupIndex);
+          // Wait for group switch
+          setTimeout(() => doScroll(chapterId, groupIndex), 100);
+          return;
+        }
+        doScroll(chapterId, groupIndex);
+      }
+  };
+
+  const handlePlayClick = () => {
+    if (resumeChapter) {
+      // If we have a resume chapter, play it and scroll to it
+      playChapter(book!, currentChapters, resumeChapter);
+      
+      // Scroll logic
+      const targetChapter = resumeChapter;
+      
+      // Determine if target chapter is in main or extra
+      const inMain = mainChapters.find(c => c.id === targetChapter.id);
+      const inExtra = extraChapters.find(c => c.id === targetChapter.id);
+      
+      let targetList = currentChapters;
+      
+      if (inMain) {
+        if (activeTab !== 'main') {
+          setActiveTab('main');
+          // Wait for tab switch then continue
+          setTimeout(() => scrollToChapterElement(targetChapter.id, mainChapters), 100);
+          return;
+        }
+        targetList = mainChapters;
+      } else if (inExtra) {
+        if (activeTab !== 'extra') {
+          setActiveTab('extra');
+          setTimeout(() => scrollToChapterElement(targetChapter.id, extraChapters), 100);
+          return;
+        }
+        targetList = extraChapters;
+      }
+      
+      scrollToChapterElement(targetChapter.id, targetList);
+    } else {
+      // Default play behavior
+      playBook(book!, currentChapters);
+    }
+  };
 
   useEffect(() => {
     const checkOverflow = () => {
@@ -504,60 +537,61 @@ const BookDetailPage: React.FC = () => {
               )}
             </div>
 
-            {/* Responsive Buttons Layout */}
-            <div className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto md:mx-0 w-full">
+            <div className="w-full flex flex-col gap-3 md:max-w-md mx-auto md:mx-0">
               <button 
-                onClick={() => playBook(book, currentChapters)}
-                className="flex-1 flex items-center justify-center gap-2 px-8 py-3.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group min-w-[140px]"
+                onClick={handlePlayClick}
+                className="w-full flex items-center justify-center gap-2 px-5 sm:px-8 py-3.5 sm:py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group"
                 style={displayThemeColor ? { 
                   backgroundColor: toSolidColor(displayThemeColor),
                   boxShadow: `0 10px 20px -5px ${setAlpha(displayThemeColor, 0.3)}`
                 } : {}}
               >
-                <Play size={20} fill="currentColor" />
-                立即播放
+                <Play size={18} fill="currentColor" />
+                {resumeChapter ? '继续播放' : '立即播放'}
               </button>
-              
-              <div className="flex gap-3 flex-1 sm:flex-none">
-                  <button 
-                    onClick={toggleFavorite}
-                    className={`flex-1 sm:flex-none p-3.5 rounded-2xl border transition-all active:scale-95 flex items-center justify-center ${
-                      isFavorite 
-                        ? 'bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30' 
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-red-500'
-                    }`}
-                  >
-                    <Heart size={24} fill={isFavorite ? "currentColor" : "none"} />
-                  </button>
-                  
-                  {user?.role === 'admin' && (
-                    <>
-                      <button 
-                        onClick={() => setIsScrapeDiffOpen(true)}
-                        className="flex-1 sm:flex-none p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center"
-                        title="同步元数据"
-                      >
-                        <RefreshCw size={24} />
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setEditData({ 
-                            ...book,
-                            // Ensure we populate the form with canonical values
-                            coverUrl: displayCoverUrl,
-                            themeColor: displayThemeColor,
-                            libraryType: displayLibraryType,
-                            skipIntro: book.skipIntro,
-                            skipOutro: book.skipOutro
-                          });
-                          setIsEditModalOpen(true);
-                        }}
-                        className="flex-1 sm:flex-none p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center"
-                      >
-                        <Edit size={24} />
-                      </button>
-                    </>
-                  )}
+
+              <div className="w-full flex gap-2 sm:gap-3">
+                <button 
+                  onClick={toggleFavorite}
+                  className={`flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm ${
+                    isFavorite 
+                      ? 'bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30' 
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-red-500'
+                  }`}
+                >
+                  <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
+                  收藏
+                </button>
+                
+                {user?.role === 'admin' && (
+                  <>
+                    <button 
+                      onClick={() => setIsScrapeDiffOpen(true)}
+                      className="flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+                      title="刮削元数据"
+                    >
+                      <RefreshCw size={20} />
+                      刮削
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setEditData({ 
+                          ...book,
+                          coverUrl: displayCoverUrl,
+                          themeColor: displayThemeColor,
+                          libraryType: displayLibraryType,
+                          skipIntro: book.skipIntro,
+                          skipOutro: book.skipOutro
+                        });
+                        setIsEditModalOpen(true);
+                      }}
+                      className="flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+                    >
+                      <Edit size={20} />
+                      编辑
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -616,28 +650,30 @@ const BookDetailPage: React.FC = () => {
             )}
           </h2>
           
-          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start">
-            <button 
-              onClick={() => { setActiveTab('main'); setCurrentGroupIndex(0); }}
-              className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                activeTab === 'main' 
-                  ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
-                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              正文 ({mainChapters.length})
-            </button>
+          <div className="flex items-center gap-2 self-start">
             {extraChapters.length > 0 && (
-              <button 
-                onClick={() => { setActiveTab('extra'); setCurrentGroupIndex(0); }}
-                className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                  activeTab === 'extra' 
-                    ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                番外 ({extraChapters.length})
-              </button>
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                <button 
+                  onClick={() => { setActiveTab('main'); setCurrentGroupIndex(0); }}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                    activeTab === 'main' 
+                      ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  正文 ({mainChapters.length})
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('extra'); setCurrentGroupIndex(0); }}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                    activeTab === 'extra' 
+                      ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  番外 ({extraChapters.length})
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -693,7 +729,6 @@ const BookDetailPage: React.FC = () => {
               <div 
                 key={chapter.id}
                 id={`chapter-${chapter.id}`}
-                onClick={() => playChapter(book!, currentChapters, chapter)}
                 className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
                   isActive 
                     ? 'bg-opacity-10 border-opacity-20' 
@@ -706,6 +741,7 @@ const BookDetailPage: React.FC = () => {
               >
                 <div 
                   className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 cursor-pointer"
+                  onClick={() => playChapter(book!, currentChapters, chapter)}
                 >
                   <div 
                     className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
@@ -713,7 +749,7 @@ const BookDetailPage: React.FC = () => {
                     }`}
                     style={isActive && displayThemeColor ? { backgroundColor: toSolidColor(displayThemeColor) } : {}}
                   >
-                    {chapter.chapter_index || (actualIndex + 1)}
+                    {chapter.chapterIndex || (actualIndex + 1)}
                   </div>
                   <div className="min-w-0">
                     <p 
@@ -742,7 +778,7 @@ const BookDetailPage: React.FC = () => {
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 pl-2 ml-2 sm:gap-4 sm:pl-4 sm:ml-4 border-l border-slate-100 dark:border-slate-800 transition-all">
                   {isCurrent && isPlaying ? (
                     <div className="flex gap-1 items-end h-5">
                       <div className="w-1 animate-music-bar-1 rounded-full" style={displayThemeColor ? { backgroundColor: toSolidColor(displayThemeColor) } : {}}></div>
@@ -750,15 +786,19 @@ const BookDetailPage: React.FC = () => {
                       <div className="w-1 animate-music-bar-3 rounded-full" style={displayThemeColor ? { backgroundColor: toSolidColor(displayThemeColor) } : {}}></div>
                     </div>
                   ) : (
-                    <div 
-                      className="w-10 h-10 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer hover:scale-105"
+                    <button
                       onClick={(e) => {
                         e.stopPropagation();
                         playChapter(book!, currentChapters, chapter);
                       }}
+                      className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-50 dark:bg-slate-800 items-center justify-center transition-all hover:scale-105 ${
+                        isActive 
+                          ? 'flex opacity-100' 
+                          : 'hidden sm:flex opacity-0 group-hover:opacity-100'
+                      }`}
                     >
                       <Play size={16} className="text-primary-600 ml-1" fill="currentColor" style={displayThemeColor ? { color: toSolidColor(displayThemeColor) } : {}} />
-                    </div>
+                    </button>
                   )}
                 </div>
               </div>
@@ -927,6 +967,16 @@ const BookDetailPage: React.FC = () => {
                       className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">流派</label>
+                    <input 
+                      type="text" 
+                      value={editData.genre || ''}
+                      onChange={e => setEditData({...editData, genre: e.target.value})}
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                    />
+                  </div>
                   
                   <div className="space-y-1">
                     <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center">
@@ -1004,19 +1054,27 @@ const BookDetailPage: React.FC = () => {
                   删除书籍
                 </button>
                 <div className="flex-1" />
-                <div className="flex gap-3">
+                <div className="flex gap-2 sm:gap-3">
+                  <button 
+                    onClick={handleWriteMetadata}
+                    className="flex-1 sm:flex-none px-2.5 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-xs sm:text-base flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
+                    title="将当前元数据写入到源文件"
+                  >
+                    <FileSignature size={16} className="sm:w-5 sm:h-5" />
+                    写入文件
+                  </button>
                   <button 
                     onClick={() => setIsEditModalOpen(false)}
-                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-sm sm:text-base"
+                    className="flex-1 sm:flex-none px-3 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-xs sm:text-base whitespace-nowrap"
                   >
                     取消
                   </button>
                   <button 
                     onClick={handleEditSave}
-                    className="flex-1 sm:flex-none px-6 sm:px-8 py-2.5 sm:py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 transition-all text-sm sm:text-base"
+                    className="flex-1 sm:flex-none px-3 sm:px-8 py-2.5 sm:py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-1.5 sm:gap-2 transition-all text-xs sm:text-base whitespace-nowrap"
                   >
-                    <Save size={18} className="sm:w-5 sm:h-5" />
-                    保存更改
+                    <Save size={16} className="sm:w-5 sm:h-5" />
+                    <span>保存<span className="hidden min-[380px]:inline">更改</span></span>
                   </button>
                 </div>
               </div>

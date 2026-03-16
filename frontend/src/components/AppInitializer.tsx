@@ -12,8 +12,6 @@ interface AppInitializerProps {
   children: React.ReactNode;
 }
 
-import { useDownloadStore } from '../store/downloadStore';
-
 // ... existing code ...
 
 const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
@@ -27,9 +25,6 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
 
   useEffect(() => {
     if (hasInitialized.current) return;
-    
-    // Initialize download queue
-    useDownloadStore.getState().initializeQueue();
     
     const initializeApp = async () => {
       hasInitialized.current = true;
@@ -45,8 +40,8 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
       const savedPassword = localStorage.getItem('saved_password');
       const serverUrl = localStorage.getItem('server_url');
 
-      // If we are already on the login page or downloads page, skip auto-login
-      if (location.pathname === '/login' || location.pathname === '/downloads' || location.pathname.startsWith('/offline')) {
+      // If we are already on the login page, skip auto-login
+      if (location.pathname === '/login') {
         setIsInitializing(false);
         return;
       }

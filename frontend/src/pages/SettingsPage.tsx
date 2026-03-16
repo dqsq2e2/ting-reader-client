@@ -1,37 +1,27 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import apiClient from '../api/client';
+import axios from 'axios';
 import { useTheme } from '../hooks/useTheme';
 import { usePlayerStore } from '../store/playerStore';
 import { 
   Settings as SettingsIcon, 
   Moon, 
   Sun, 
-  Monitor, 
-  Zap, 
-  FastForward, 
+  Monitor,
+  FastForward,
   CheckCircle2,
   User,
   Key,
   Code,
   Copy,
-  Download,
-  ChevronRight
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { useDownloadStore } from '../store/downloadStore';
-
-type ElectronApi = {
-  getCacheSize: () => Promise<number>;
-  clearCache: () => Promise<void>;
-};
 
 type SettingsPayload = {
   playback_speed: number;
   sleep_timer_default: number;
   auto_preload: boolean;
   auto_cache: boolean;
-  client_auto_download: boolean;
   theme: 'light' | 'dark' | 'system';
   widget_css: string;
 };
@@ -46,17 +36,14 @@ const defaultSettings: SettingsPayload = {
   sleep_timer_default: 0,
   auto_preload: false,
   auto_cache: false,
-  client_auto_download: false,
   theme: 'system',
   widget_css: ''
 };
 
 const SettingsPage: React.FC = () => {
-  const navigate = useNavigate();
   const { user, setUser } = useAuthStore();
   const { applyTheme } = useTheme();
   const setPlaybackSpeed = usePlayerStore(state => state.setPlaybackSpeed);
-  const setClientAutoDownload = usePlayerStore(state => state.setClientAutoDownload);
   const [settings, setSettings] = useState<SettingsPayload>(defaultSettings);
   const [accountData, setAccountData] = useState({
     username: user?.username || '',
@@ -67,36 +54,20 @@ const SettingsPage: React.FC = () => {
   const [accountSaved, setAccountSaved] = useState(false);
   const [widgetEmbedType, setWidgetEmbedType] = useState<'private' | 'public'>('private');
   const [backendVersion, setBackendVersion] = useState<string>('');
+  const [clientVersion, setClientVersion] = useState<string>('1.0.8'); // Default or read from env
+  const [showAbout, setShowAbout] = useState(false);
   
-  // Cache stats for Electron
-  const [cacheSize, setCacheSize] = useState<number | null>(null);
-  const electronAPI = (window as Window & { electronAPI?: ElectronApi }).electronAPI;
-  const isElectron = !!electronAPI;
-
-  const updateCacheStats = useCallback(async () => {
-    try {
-      if (!electronAPI) return;
-      const size = await electronAPI.getCacheSize();
-      setCacheSize(size);
-    } catch (err) {
-      console.error('Failed to get cache size', err);
-    }
-  }, [electronAPI]);
-
-  const handleClearCache = async () => {
-    if (!confirm('确定要清空所有已下载的音频缓存吗？这将需要重新下载。')) return;
-    try {
-      if (!electronAPI) return;
-      await electronAPI.clearCache();
-      await updateCacheStats();
-      // Also clear download store status
-      useDownloadStore.getState().clearAllTasks();
-      alert('缓存已清空');
-    } catch {
-      alert('清空缓存失败');
-    }
+  type UpdateInfo = {
+    version: string;
+    downloadUrl: Record<string, string>;
+    size: Record<string, string>;
+    date: string;
   };
-
+  const [backendUpdateInfo, setBackendUpdateInfo] = useState<{version: string, date: string} | null>(null);
+  const [checkingBackendUpdate, setCheckingBackendUpdate] = useState(false);
+  const [clientUpdateInfo, setClientUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [checkingClientUpdate, setCheckingClientUpdate] = useState(false);
+  
   const fetchSettings = useCallback(async () => {
     try {
       const response = await apiClient.get<Partial<SettingsPayload>>('/api/settings');
@@ -106,7 +77,6 @@ const SettingsPage: React.FC = () => {
         sleep_timer_default: response.data?.sleepTimerDefault ?? 0,
         auto_preload: response.data?.settingsJson?.autoPreload !== undefined ? !!response.data.settingsJson.autoPreload : !!response.data?.autoPreload,
         auto_cache: response.data?.settingsJson?.autoCache !== undefined ? !!response.data.settingsJson.autoCache : !!response.data?.autoCache,
-        client_auto_download: !!(response.data?.clientAutoDownload || response.data?.settingsJson?.clientAutoDownload),
         theme: response.data?.theme ?? 'system',
         widget_css: response.data?.widgetCss ?? ''
       };
@@ -129,10 +99,81 @@ const SettingsPage: React.FC = () => {
         setBackendVersion(res.data.version);
       }
     }).catch(console.error);
-    if (isElectron) {
-      updateCacheStats();
+    
+    // Attempt to get version from Electron bridge if available, otherwise fallback
+    if (window.electronAPI && window.electronAPI.getVersion) {
+        window.electronAPI.getVersion().then(setClientVersion);
     }
-  }, [fetchSettings, isElectron, updateCacheStats]);
+  }, [fetchSettings]);
+
+  const handleCheckBackendUpdate = async () => {
+      if (checkingBackendUpdate || !backendVersion) return;
+      setCheckingBackendUpdate(true);
+      try {
+          const { data } = await axios.get('https://www.tingreader.cn/api/fpk/docker');
+          const remoteVersion = data.version.replace(/^v/, '');
+          const currentVersion = backendVersion.replace(/^v/, '');
+          
+          if (remoteVersion !== currentVersion) {
+              setBackendUpdateInfo(data);
+          } else {
+              const toast = document.createElement('div');
+              toast.className = 'fixed bottom-20 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg animate-in fade-in slide-in-from-bottom-4 z-50';
+              toast.innerText = '服务端已是最新版本';
+              document.body.appendChild(toast);
+              setTimeout(() => {
+                  toast.classList.add('animate-out', 'fade-out', 'slide-out-to-bottom-4');
+                  setTimeout(() => toast.remove(), 300);
+              }, 2000);
+          }
+      } catch (error) {
+          console.error('Check backend update failed', error);
+          alert('检查服务端更新失败，请稍后重试');
+      } finally {
+          setCheckingBackendUpdate(false);
+      }
+  };
+
+  const handleCheckClientUpdate = async () => {
+      if (checkingClientUpdate) return;
+      setCheckingClientUpdate(true);
+      try {
+          const { data } = await axios.get('https://www.tingreader.cn/api/client/desktop');
+          const remoteVersion = data.version.replace(/^v/, '');
+          const currentVersion = clientVersion.replace(/^v/, '');
+          
+          if (remoteVersion !== currentVersion) {
+              setClientUpdateInfo(data);
+          } else {
+              const toast = document.createElement('div');
+              toast.className = 'fixed bottom-20 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg animate-in fade-in slide-in-from-bottom-4 z-50';
+              toast.innerText = '客户端已是最新版本';
+              document.body.appendChild(toast);
+              setTimeout(() => {
+                  toast.classList.add('animate-out', 'fade-out', 'slide-out-to-bottom-4');
+                  setTimeout(() => toast.remove(), 300);
+              }, 2000);
+          }
+      } catch (error) {
+          console.error('Check client update failed', error);
+          alert('检查客户端更新失败，请稍后重试');
+      } finally {
+          setCheckingClientUpdate(false);
+      }
+  };
+  
+  const getPlatformDownloadUrl = (urls: Record<string, string>) => {
+      // Simple heuristic based on user agent, or show all
+      const ua = navigator.userAgent.toLowerCase();
+      if (ua.includes('win')) return { url: urls.winExe, type: 'Windows (exe)' };
+      if (ua.includes('mac')) {
+          return ua.includes('arm') || ua.includes('apple') 
+            ? { url: urls.macArmDmg, type: 'macOS (Apple Silicon)' }
+            : { url: urls.macIntelDmg, type: 'macOS (Intel)' };
+      }
+      if (ua.includes('linux')) return { url: urls.appImage, type: 'Linux (AppImage)' };
+      return null;
+  };
 
   const handleSave = async (newSettings: SettingsPayload) => {
     try {
@@ -165,11 +206,6 @@ const SettingsPage: React.FC = () => {
         setPlaybackSpeed(newSettings.playback_speed);
       }
 
-      // Sync client auto download to player store
-      if (newSettings.client_auto_download !== undefined) {
-        setClientAutoDownload(newSettings.client_auto_download);
-      }
-      
       // Apply theme immediately if it changed
       if (newSettings.theme) {
         applyTheme(newSettings.theme);
@@ -323,49 +359,8 @@ const SettingsPage: React.FC = () => {
           </div>
         </section>
 
-        {/* Cache Settings (Electron Only) */}
-        {isElectron && user?.role === 'admin' && (
-          <section className="bg-white dark:bg-slate-900 rounded-3xl p-4 md:p-6 border border-slate-100 dark:border-slate-800 shadow-sm">
-            <h2 className="text-xl font-bold dark:text-white mb-6 flex items-center gap-2">
-              <Zap size={20} className="text-yellow-500" />
-              缓存管理
-            </h2>
-            
-            <div 
-                onClick={() => navigate('/downloads')}
-                className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors mb-6"
-            >
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-primary-50 dark:bg-primary-900/20 rounded-xl flex items-center justify-center text-primary-600">
-                        <Download size={20} />
-                    </div>
-                    <div>
-                        <div className="font-bold text-slate-900 dark:text-white">下载管理</div>
-                        <div className="text-xs text-slate-500 font-medium">查看下载任务和已缓存内容</div>
-                    </div>
-                </div>
-                <ChevronRight size={18} className="text-slate-400" />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-bold dark:text-white">本地音频缓存</p>
-                <p className="text-xs md:text-sm text-slate-500">
-                  当前占用: {cacheSize !== null ? (cacheSize / 1024 / 1024).toFixed(2) : '...'} MB
-                </p>
-              </div>
-              <button
-                onClick={handleClearCache}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 font-bold rounded-xl transition-all text-sm"
-              >
-                清空缓存
-              </button>
-            </div>
-          </section>
-        )}
-
         {/* Playback Settings */}
-        <section className="bg-white dark:bg-slate-900 rounded-3xl p-4 md:p-6 border border-slate-100 dark:border-slate-800 shadow-sm">
+          <section className="bg-white dark:bg-slate-900 rounded-3xl p-4 md:p-6 border border-slate-100 dark:border-slate-800 shadow-sm">
           <h2 className="text-xl font-bold dark:text-white mb-6 flex items-center gap-2">
             <FastForward size={20} className="text-orange-500" />
             播放偏好
@@ -426,27 +421,6 @@ const SettingsPage: React.FC = () => {
                 }`} />
               </button>
             </div>
-
-            {isElectron && (
-              <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold dark:text-white truncate">客户端自动下载 (离线播放)</p>
-                  <p className="text-xs md:text-sm text-slate-500 line-clamp-2">
-                    播放当前章节时，自动下载下一章节到本地设备
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleSave({ ...settings, client_auto_download: !settings.client_auto_download })}
-                  className={`flex-shrink-0 w-12 md:w-14 h-7 md:h-8 rounded-full transition-all relative ${
-                    settings.client_auto_download ? 'bg-primary-600' : 'bg-slate-200 dark:bg-slate-700'
-                  }`}
-                >
-                  <div className={`absolute top-1 w-5 md:w-6 h-5 md:h-6 bg-white rounded-full transition-all ${
-                    settings.client_auto_download ? 'left-6 md:left-7' : 'left-1'
-                  }`} />
-                </button>
-              </div>
-            )}
           </div>
         </section>
 
@@ -611,10 +585,183 @@ const SettingsPage: React.FC = () => {
         )}
       </div>
 
-      <div className="text-center text-slate-400 text-sm py-8">
-        {backendVersion && <p className="mb-2 text-xs opacity-60">服务端版本 v{backendVersion}</p>}
-        <p>©2026 Ting Reader.保留所有权利。</p>
+      <div className="text-center text-slate-400 text-sm py-8 pb-24 md:pb-8">
+        <button 
+            onClick={() => setShowAbout(true)}
+            className="text-slate-400 hover:text-primary-600 transition-colors text-sm font-bold underline decoration-slate-300 dark:decoration-slate-700 underline-offset-4"
+        >
+            关于 Ting Reader
+        </button>
+        <p className="mt-4 text-xs opacity-60">©2026 Ting Reader.保留所有权利。</p>
       </div>
+
+      {/* About Modal */}
+      {showAbout && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border border-slate-100 dark:border-slate-800">
+                <div className="text-center mb-6">
+                    <img src="/logo.png" alt="Ting Reader Logo" className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-sm object-contain p-1" />
+                    <h3 className="text-xl font-bold dark:text-white">关于 Ting Reader</h3>
+                </div>
+                
+                <div className="space-y-4 mb-6">
+                    <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                        <span className="text-sm font-bold text-slate-500">服务端版本</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold dark:text-white">v{backendVersion || 'Unknown'}</span>
+                            <button 
+                                onClick={handleCheckBackendUpdate}
+                                disabled={checkingBackendUpdate || !backendVersion}
+                                className="text-xs bg-primary-50 dark:bg-primary-900/20 text-primary-600 px-2 py-1 rounded-lg font-bold hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors disabled:opacity-50"
+                            >
+                                {checkingBackendUpdate ? '检查中...' : '检查更新'}
+                            </button>
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                        <span className="text-sm font-bold text-slate-500">客户端版本</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold dark:text-white">v{clientVersion}</span>
+                            <button 
+                                onClick={handleCheckClientUpdate}
+                                disabled={checkingClientUpdate}
+                                className="text-xs bg-primary-50 dark:bg-primary-900/20 text-primary-600 px-2 py-1 rounded-lg font-bold hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors disabled:opacity-50"
+                            >
+                                {checkingClientUpdate ? '检查中...' : '检查更新'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="text-center mb-6">
+                    <span className="text-sm text-slate-500 mr-2">官网地址</span>
+                    <a 
+                        href="#"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            // Electron or Browser open external
+                            if (window.electronAPI && window.electronAPI.openExternal) {
+                                window.electronAPI.openExternal('https://www.tingreader.cn');
+                            } else {
+                                window.open('https://www.tingreader.cn', '_blank');
+                            }
+                        }}
+                        className="text-sm text-primary-600 hover:text-primary-700 font-bold"
+                    >
+                        www.tingreader.cn
+                    </a>
+                </div>
+
+                <button 
+                    onClick={() => setShowAbout(false)}
+                    className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                    关闭
+                </button>
+            </div>
+        </div>
+      )}
+
+      {/* Backend Update Modal */}
+      {backendUpdateInfo && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border border-slate-100 dark:border-slate-800">
+                <div className="text-center mb-6">
+                    <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4 text-blue-600">
+                        <CheckCircle2 size={32} />
+                    </div>
+                    <h3 className="text-xl font-bold dark:text-white">发现服务端新版本 {backendUpdateInfo.version}</h3>
+                    <p className="text-sm text-slate-500 mt-2">
+                        发布时间: {new Date(backendUpdateInfo.date).toLocaleDateString()}
+                    </p>
+                </div>
+                
+                <div className="flex gap-3">
+                    <button 
+                        onClick={() => setBackendUpdateInfo(null)}
+                        className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                    >
+                        暂不更新
+                    </button>
+                    <button 
+                        onClick={() => {
+                            const url = 'https://www.tingreader.cn/guide/update';
+                            if (window.electronAPI && window.electronAPI.openExternal) {
+                                window.electronAPI.openExternal(url);
+                            } else {
+                                window.open(url, '_blank');
+                            }
+                            setBackendUpdateInfo(null);
+                        }}
+                        className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30"
+                    >
+                        前往官网更新
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Client Update Modal */}
+      {clientUpdateInfo && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border border-slate-100 dark:border-slate-800">
+                <div className="text-center mb-6">
+                    <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4 text-green-600">
+                        <CheckCircle2 size={32} />
+                    </div>
+                    <h3 className="text-xl font-bold dark:text-white">发现客户端新版本 {clientUpdateInfo.version}</h3>
+                    <p className="text-sm text-slate-500 mt-2">
+                        发布时间: {new Date(clientUpdateInfo.date).toLocaleDateString()}
+                    </p>
+                </div>
+                
+                <div className="flex flex-col gap-3">
+                    {(() => {
+                        const rec = getPlatformDownloadUrl(clientUpdateInfo.downloadUrl);
+                        if (rec) {
+                            return (
+                                <button 
+                                    onClick={() => {
+                                        if (window.electronAPI && window.electronAPI.openExternal) {
+                                            window.electronAPI.openExternal(rec.url);
+                                        } else {
+                                            window.open(rec.url, '_blank');
+                                        }
+                                    }}
+                                    className="w-full py-3 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 transition-colors shadow-lg shadow-primary-500/30"
+                                >
+                                    下载 {rec.type}
+                                </button>
+                            );
+                        }
+                        // Fallback: show all relevant options or just a link to site
+                        return Object.entries(clientUpdateInfo.downloadUrl).map(([key, url]) => (
+                            <button 
+                                key={key}
+                                onClick={() => {
+                                    if (window.electronAPI && window.electronAPI.openExternal) {
+                                        window.electronAPI.openExternal(url);
+                                    } else {
+                                        window.open(url, '_blank');
+                                    }
+                                }}
+                                className="w-full py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
+                            >
+                                下载 {key}
+                            </button>
+                        ));
+                    })()}
+                    <button 
+                        onClick={() => setClientUpdateInfo(null)}
+                        className="w-full py-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold transition-colors"
+                    >
+                        暂不更新
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

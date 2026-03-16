@@ -5,7 +5,7 @@ import type { Book, Library, Series } from '../types';
 import BookCard from '../components/BookCard';
 import SeriesCard from '../components/SeriesCard';
 import SeriesModal from '../components/SeriesModal';
-import { Search, Filter, Database, Plus, Library as LibraryIcon, Layers, Check, X } from 'lucide-react';
+import { Search, Filter, Database, Plus, Library as LibraryIcon, Layers, Check, X, CheckSquare } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
 import { getPinyinInitial } from '../utils/pinyin';
 
@@ -124,6 +124,20 @@ const BookshelfPage: React.FC = () => {
     );
   };
 
+  const handleSelectAll = () => {
+    if (filteredBooks.length === 0) return;
+    
+    const allVisibleSelected = filteredBooks.every(b => selectedBookIds.includes(b.id));
+    
+    if (allVisibleSelected) {
+      const visibleIds = new Set(filteredBooks.map(b => b.id));
+      setSelectedBookIds(prev => prev.filter(id => !visibleIds.has(id)));
+    } else {
+      const visibleIds = filteredBooks.map(b => b.id);
+      setSelectedBookIds(prev => [...new Set([...prev, ...visibleIds])]);
+    }
+  };
+
   const getGridCols = () => {
     switch (iconSize) {
       case 'small':
@@ -238,6 +252,14 @@ const BookshelfPage: React.FC = () => {
                 <span className="text-sm font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap hidden sm:inline">
                   已选 {selectedBookIds.length}
                 </span>
+                <button
+                  onClick={handleSelectAll}
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0"
+                  title="全选当前"
+                >
+                  <CheckSquare size={18} />
+                  <span>全选</span>
+                </button>
                 <button
                   onClick={() => setIsSeriesModalOpen(true)}
                   disabled={selectedBookIds.length === 0}

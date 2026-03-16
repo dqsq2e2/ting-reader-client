@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
-import camelcaseKeys from 'camelcase-keys';
 import type { Library } from '../types';
 import { 
   Plus, 
@@ -21,8 +20,7 @@ import {
 const ScraperConfigurator = ({ 
   configStr, 
   sources, 
-  onChange,
-  libraryType
+  onChange
 }: { 
   configStr: string, 
   sources: {id: string, name: string}[], 
@@ -32,6 +30,7 @@ const ScraperConfigurator = ({
   const [activeTab, setActiveTab] = useState('default');
   
   const tabs = [
+    { id: 'priority', label: '优先级', key: 'metadataPriority' },
     { id: 'default', label: '默认', key: 'defaultSources' },
     { id: 'cover', label: '封面', key: 'coverSources' },
     { id: 'intro', label: '简介', key: 'introSources' },
@@ -43,43 +42,70 @@ const ScraperConfigurator = ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let config: Record<string, any> = {};
   try {
-    const parsed = configStr ? JSON.parse(configStr) : {};
-    config = camelcaseKeys(parsed, { deep: true });
+    config = configStr ? JSON.parse(configStr) : {};
   } catch {
     config = {};
   }
 
   const currentTab = tabs.find(t => t.id === activeTab) || tabs[0];
   const currentKey = currentTab.key;
-  const activeIds: string[] = config[currentKey] || [];
-  // Use camelCase first (as API transforms it), then fallback to snake_case (though normalized above, just in case)
-  const nfoEnabled = config.nfoWritingEnabled !== undefined ? config.nfoWritingEnabled : (config.nfo_writing_enabled || false);
-  const preferAudioTitle = config.preferAudioTitle !== undefined ? config.preferAudioTitle : (config.prefer_audio_title || false);
+  
+  // Handle snake_case vs camelCase from legacy data
+  const snakeCaseMap: Record<string, string> = {
+    'metadataPriority': 'metadata_priority',
+    'defaultSources': 'default_sources',
+    'coverSources': 'cover_sources',
+    'introSources': 'intro_sources',
+    'authorSources': 'author_sources',
+    'narratorSources': 'narrator_sources',
+    'tagsSources': 'tags_sources',
+  };
+  
+  // Special handling for priority tab
+  const PRIORITY_SOURCES = [
+    { id: 'local_metadata', name: '本地元数据 (JSON/NFO)' },
+    { id: 'audio_metadata', name: '音频文件元数据 (ID3)' },
+    { id: 'scraper', name: '刮削器 (Plugins)' }
+  ];
+
+  let activeIds: string[] = config[currentKey] ?? config[snakeCaseMap[currentKey]] ?? [];
+  
+  // Initialize default priority if empty
+  if (activeTab === 'priority' && activeIds.length === 0) {
+      activeIds = ['local_metadata', 'audio_metadata', 'scraper'];
+  }
+
+  const nfoEnabled = config.nfoWritingEnabled ?? config.nfo_writing_enabled ?? false;
+  const metadataWritingEnabled = config.metadataWritingEnabled ?? config.metadata_writing_enabled ?? false;
+  const preferAudioTitle = config.preferAudioTitle ?? config.prefer_audio_title ?? false;
 
   const handleNfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      // Always save as camelCase to match API expectations if we want to be consistent,
-      // but if the backend expects snake_case, the apiClient interceptor will handle it.
-      // So we should update state with camelCase.
-      const newConfig = { ...config, nfoWritingEnabled: e.target.checked, nfo_writing_enabled: undefined };
-      // Remove legacy snake_case key to avoid confusion
+      const newConfig = { ...config, nfoWritingEnabled: e.target.checked };
       delete newConfig.nfo_writing_enabled;
-      
+      onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handleMetadataWritingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newConfig = { ...config, metadataWritingEnabled: e.target.checked };
+      delete newConfig.metadata_writing_enabled;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handlePreferAudioTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newConfig = { ...config, preferAudioTitle: e.target.checked, prefer_audio_title: undefined };
-    delete newConfig.prefer_audio_title;
-    onChange(JSON.stringify(newConfig, null, 2));
+      const newConfig = { ...config, preferAudioTitle: e.target.checked };
+      delete newConfig.prefer_audio_title;
+      onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleAdd = (sourceId: string) => {
     const newConfig = { ...config, [currentKey]: [...activeIds, sourceId] };
+    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleRemove = (sourceId: string) => {
     const newConfig = { ...config, [currentKey]: activeIds.filter(id => id !== sourceId) };
+    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -91,40 +117,26 @@ const ScraperConfigurator = ({
       [newList[index], newList[index + 1]] = [newList[index + 1], newList[index]];
     }
     const newConfig = { ...config, [currentKey]: newList };
+    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const activeSources = activeIds.map(id => {
-    const source = sources.find(s => s.id === id);
+    const sourceList = activeTab === 'priority' ? PRIORITY_SOURCES : sources;
+    const source = sourceList.find(s => s.id === id);
     return source || { id, name: id }; // Fallback for unknown IDs
   });
 
-  const availableSources = sources.filter(s => !activeIds.includes(s.id));
+  const availableSources = activeTab === 'priority' 
+      ? [] 
+      : sources.filter(s => !activeIds.includes(s.id));
 
   return (
     <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-      {/* Prefer Audio Title Toggle */}
-      <div className="flex items-center gap-3 mb-4 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
-        <input 
-          type="checkbox" 
-          id="prefer-audio-title" 
-          checked={preferAudioTitle} 
-          onChange={handlePreferAudioTitleChange}
-          className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
-        />
-        <div className="flex flex-col">
-          <label htmlFor="prefer-audio-title" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-            优先使用音频 ID3 标题
-          </label>
-          <span className="text-[10px] text-slate-400">
-            开启后，如果检测到 ID3 标签中的专辑标题，将优先使用该标题而不是目录名
-          </span>
-        </div>
-      </div>
-
-      {/* NFO Toggle - Only show for local libraries */}
-      {libraryType === 'local' && (
-        <div className="flex items-center gap-3 mb-4 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+      {/* Settings Toggles */}
+      <div className="space-y-2 mb-4">
+        {/* NFO Toggle - Show for all libraries */}
+        <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
           <input 
             type="checkbox" 
             id="nfo-writing" 
@@ -141,16 +153,54 @@ const ScraperConfigurator = ({
             </span>
           </div>
         </div>
-      )}
+
+        {/* Metadata JSON Toggle - Show for all libraries */}
+        <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+          <input 
+            type="checkbox" 
+            id="metadata-writing" 
+            checked={metadataWritingEnabled} 
+            onChange={handleMetadataWritingChange}
+            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
+          />
+          <div className="flex flex-col">
+            <label htmlFor="metadata-writing" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+              写入 metadata.json
+            </label>
+            <span className="text-[10px] text-slate-400">
+              开启后，生成 Audiobookshelf 兼容的 metadata.json 元数据文件
+            </span>
+          </div>
+        </div>
+
+        {/* Prefer Audio Title - Show for all libraries */}
+        <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+          <input 
+            type="checkbox" 
+            id="prefer-audio-title" 
+            checked={preferAudioTitle} 
+            onChange={handlePreferAudioTitleChange}
+            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
+          />
+          <div className="flex flex-col">
+            <label htmlFor="prefer-audio-title" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+              优先使用文件/文件夹名作为标题
+            </label>
+            <span className="text-[10px] text-slate-400">
+              开启后，忽略优先级配置，强制使用文件夹名作为书名、文件名作为章节名
+            </span>
+          </div>
+        </div>
+      </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-4 border-b border-slate-200 dark:border-slate-700 no-scrollbar">
+      <div className="flex gap-1 overflow-x-auto pb-2 mb-4 border-b border-slate-200 dark:border-slate-700 no-scrollbar">
         {tabs.map(tab => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
+            className={`px-2.5 py-1 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-all ${
               activeTab === tab.id
                 ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm'
                 : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
@@ -161,11 +211,11 @@ const ScraperConfigurator = ({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className={`grid ${activeTab === 'priority' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'} gap-4`}>
         {/* Active List (Ordered) */}
         <div className="space-y-2">
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
-            <span>已启用 (按优先级排序)</span>
+            <span>{activeTab === 'priority' ? '元数据来源优先级排序 (拖动调整)' : '已启用 (按优先级排序)'}</span>
             <span className="text-primary-600">{activeSources.length}</span>
           </div>
           <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 min-h-[120px] p-2 space-y-2">
@@ -193,7 +243,8 @@ const ScraperConfigurator = ({
                     <button
                       type="button"
                       onClick={() => handleRemove(source.id)}
-                      className="p-1 hover:bg-red-100 text-slate-400 hover:text-red-500 rounded ml-1"
+                      disabled={activeTab === 'priority'}
+                      className={`p-1 rounded ml-1 ${activeTab === 'priority' ? 'opacity-0 cursor-default' : 'hover:bg-red-100 text-slate-400 hover:text-red-500'}`}
                     >
                       <X size={14} />
                     </button>
@@ -210,31 +261,33 @@ const ScraperConfigurator = ({
         </div>
 
         {/* Available List */}
-        <div className="space-y-2">
-          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
-            <span>可用插件</span>
-            <span className="text-slate-400">{availableSources.length}</span>
+        {activeTab !== 'priority' && (
+          <div className="space-y-2">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
+              <span>可用插件</span>
+              <span className="text-slate-400">{availableSources.length}</span>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 min-h-[120px] p-2 space-y-2">
+              {availableSources.length > 0 ? (
+                availableSources.map(source => (
+                  <button
+                    key={source.id}
+                    type="button"
+                    onClick={() => handleAdd(source.id)}
+                    className="w-full flex items-center justify-between p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-md group text-left transition-colors"
+                  >
+                    <span className="text-sm font-medium truncate dark:text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200">{source.name}</span>
+                    <Plus size={16} className="text-primary-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                ))
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-400 text-xs italic p-4">
+                  {sources.length === 0 ? '未检测到插件' : '已全部添加'}
+                </div>
+              )}
+            </div>
           </div>
-          <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 min-h-[120px] p-2 space-y-2">
-            {availableSources.length > 0 ? (
-              availableSources.map(source => (
-                <button
-                  key={source.id}
-                  type="button"
-                  onClick={() => handleAdd(source.id)}
-                  className="w-full flex items-center justify-between p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-md group text-left transition-colors"
-                >
-                  <span className="text-sm font-medium truncate dark:text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200">{source.name}</span>
-                  <Plus size={16} className="text-primary-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
-              ))
-            ) : (
-              <div className="h-full flex items-center justify-center text-slate-400 text-xs italic p-4">
-                {sources.length === 0 ? '未检测到插件' : '已全部添加'}
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </div>
       
       <p className="text-[10px] text-slate-400 mt-3">
