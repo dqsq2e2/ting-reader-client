@@ -14,7 +14,11 @@ export interface ScraperConfig {
   authorSources?: string[];
   narratorSources?: string[];
   tagsSources?: string[];
-  nfoWritingEnabled?: boolean;
+  nfo_writing_enabled?: boolean;
+  metadata_writing_enabled?: boolean;
+  prefer_audio_title?: boolean;
+  metadataPriority?: string[];
+  extractAudioCover?: boolean;
 }
 
 export interface Library {
@@ -36,6 +40,7 @@ export interface Book {
   title: string;
   author?: string;
   narrator?: string;
+  genre?: string;
   description?: string;
   coverUrl?: string;
   themeColor?: string;

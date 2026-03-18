@@ -19,6 +19,7 @@ const SeriesDetailPage: React.FC = () => {
   // Filter & Sort state
   const [sortBy, setSortBy] = useState<'default' | 'title' | 'author' | 'createdAt'>('default');
   const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
+  const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   // Edit form state
@@ -56,6 +57,9 @@ const SeriesDetailPage: React.FC = () => {
         }
         if (settings.seriesIconSize) {
           setIconSize(settings.seriesIconSize);
+        }
+        if (settings.bookshelfCoverShape) {
+          setCoverShape(settings.bookshelfCoverShape);
         }
       } catch (err) {
         console.error('Failed to load settings', err);
@@ -360,7 +364,7 @@ const SeriesDetailPage: React.FC = () => {
                 {books.length > 0 ? (
                     <div className={`grid ${getGridCols()}`}>
                         {getSortedBooks().map((book) => (
-                            <BookCard key={book.id} book={book} />
+                            <BookCard key={book.id} book={book} coverShape={coverShape} />
                         ))}
                     </div>
                 ) : (

@@ -19,6 +19,7 @@ const BookshelfPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'createdAt' | 'title' | 'author'>('createdAt');
   const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
+  const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   
@@ -30,6 +31,38 @@ const BookshelfPage: React.FC = () => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [isSeriesModalOpen, setIsSeriesModalOpen] = useState(false);
+
+  // Lazy loading state
+  const [visibleCount, setVisibleCount] = useState(50);
+  const loadMoreRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => prev + 50);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentRef = loadMoreRef.current;
+
+    if (currentRef) {
+      observer.observe(currentRef);
+    }
+
+    return () => {
+      if (currentRef) {
+        observer.unobserve(currentRef);
+      }
+    };
+  }, [books.length, series.length, searchQuery, sortBy, selectedLibraryId]);
+
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [searchQuery, sortBy, selectedLibraryId]);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -45,6 +78,9 @@ const BookshelfPage: React.FC = () => {
         }
         if (settings.bookshelfIconSize) {
           setIconSize(settings.bookshelfIconSize);
+        }
+        if (settings.bookshelfCoverShape) {
+          setCoverShape(settings.bookshelfCoverShape);
         }
       } catch (err) {
         console.error('Failed to load settings', err);
@@ -72,16 +108,41 @@ const BookshelfPage: React.FC = () => {
     apiClient.post('/api/settings', { bookshelfIconSize: newSize });
   };
 
+  const handleCoverShapeChange = (newShape: 'rect' | 'square') => {
+    setCoverShape(newShape);
+    setShowFilterMenu(false);
+    apiClient.post('/api/settings', { bookshelfCoverShape: newShape });
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [booksRes, libsRes, seriesRes] = await Promise.all([
-        apiClient.get('/api/books', { params: { libraryId: selectedLibraryId || undefined } }),
-        apiClient.get('/api/libraries'),
-        apiClient.get('/api/v1/series', { params: { library_id: selectedLibraryId || undefined } })
+      // 1. Fetch Libraries first
+      const libsRes = await apiClient.get('/api/libraries');
+      const libs = libsRes.data;
+      setLibraries(libs);
+
+      // 2. Determine effective library ID
+      let effectiveLibraryId = selectedLibraryId;
+      
+      // If we have a selected ID but it's not in the fetched libraries, reset it
+      if (selectedLibraryId) {
+        const exists = libs.find((l: Library) => l.id === selectedLibraryId);
+        if (!exists) {
+          console.warn(`Selected library ${selectedLibraryId} not found, resetting to default.`);
+          effectiveLibraryId = '';
+          setSelectedLibraryId('');
+          // Update settings to clear the invalid ID
+          apiClient.post('/api/settings', { bookshelfLibraryId: '' });
+        }
+      }
+
+      // 3. Fetch Books & Series with effective ID
+      const [booksRes, seriesRes] = await Promise.all([
+        apiClient.get('/api/books', { params: { libraryId: effectiveLibraryId || undefined } }),
+        apiClient.get('/api/v1/series', { params: { library_id: effectiveLibraryId || undefined } })
       ]);
       setBooks(booksRes.data);
-      setLibraries(libsRes.data);
       setSeries(seriesRes.data);
     } catch (err) {
       console.error('Failed to fetch data', err);
@@ -197,6 +258,30 @@ const BookshelfPage: React.FC = () => {
 
     return { groups, sortedKeys };
   }, [filteredBooks, filteredSeries, sortBy]);
+
+  const visibleGroupedItems = React.useMemo(() => {
+    if (!groupedItems) return null;
+    let count = 0;
+    const newGroups: Record<string, (Book | Series)[]> = {};
+    const newSortedKeys: string[] = [];
+
+    for (const key of groupedItems.sortedKeys) {
+      if (count >= visibleCount) break;
+      const itemsInGroup = groupedItems.groups[key];
+      const itemsToTake = Math.min(itemsInGroup.length, visibleCount - count);
+      
+      if (itemsToTake > 0) {
+        newGroups[key] = itemsInGroup.slice(0, itemsToTake);
+        newSortedKeys.push(key);
+        count += itemsToTake;
+      }
+    }
+    return { groups: newGroups, sortedKeys: newSortedKeys };
+  }, [groupedItems, visibleCount]);
+
+  const visibleSeries = !isSelectionMode ? filteredSeries.slice(0, visibleCount) : [];
+  const remainingCount = Math.max(0, visibleCount - visibleSeries.length);
+  const visibleBooks = filteredBooks.slice(0, remainingCount);
 
   const scrollToGroup = (key: string) => {
     setActiveLetter(key);
@@ -372,13 +457,31 @@ const BookshelfPage: React.FC = () => {
                     {iconSize === 'medium' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
                   </button>
                   <button 
-                    onClick={() => handleIconSizeChange('small')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${iconSize === 'small' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    小图标
-                    {iconSize === 'small' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
+                  onClick={() => handleIconSizeChange('small')}
+                  className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${iconSize === 'small' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                >
+                  小图标
+                  {iconSize === 'small' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
+                </button>
+
+                <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest border-t border-b border-slate-50 dark:border-slate-800 mt-2 mb-1">
+                  封面形状
                 </div>
+                <button 
+                  onClick={() => handleCoverShapeChange('rect')}
+                  className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${coverShape === 'rect' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                >
+                  3:4 比例 (默认)
+                  {coverShape === 'rect' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
+                </button>
+                <button 
+                  onClick={() => handleCoverShapeChange('square')}
+                  className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${coverShape === 'square' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                >
+                  1:1 方形
+                  {coverShape === 'square' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
+                </button>
+              </div>
               )}
             </div>
           </div>
@@ -436,37 +539,38 @@ const BookshelfPage: React.FC = () => {
             </>
           )}
 
-          {groupedItems ? (
+          {visibleGroupedItems ? (
              // Grouped Layout
              <div className="space-y-6">
-               {groupedItems.sortedKeys.map(key => (
+               {visibleGroupedItems.sortedKeys.map(key => (
                  <div key={key} id={`group-${key}`}>
                    <div className="text-xs font-bold text-slate-400 dark:text-slate-500 mb-2 pl-1">
                       {key}
                    </div>
                    <div className={`grid ${getGridCols()}`}>
-                     {groupedItems.groups[key].map(item => (
+                     {visibleGroupedItems.groups[key].map(item => (
                        'books' in item ? (
-                         <SeriesCard key={item.id} series={item as Series} />
+                         <SeriesCard key={item.id} series={item as Series} coverShape={coverShape} />
                        ) : (
                          <div key={item.id} className="relative">
-                            {isSelectionMode ? (
-                              <>
-                                <div className={`absolute top-2 right-2 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all pointer-events-none ${selectedBookIds.includes(item.id) ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white/80 dark:bg-slate-900/80 border-slate-300 dark:border-slate-600'}`}>
-                                  {selectedBookIds.includes(item.id) && <Check size={14} />}
-                                </div>
-                                <div className={`transition-opacity duration-200 ${selectedBookIds.includes(item.id) ? 'opacity-100' : 'opacity-60 grayscale-[0.5]'}`}>
-                                  <BookCard 
-                                    book={item as Book} 
-                                    disableLink 
-                                    onClick={() => toggleBookSelection(item.id)} 
-                                  />
-                                </div>
-                              </>
-                            ) : (
-                              <BookCard book={item as Book} />
-                            )}
-                         </div>
+                          {isSelectionMode ? (
+                            <>
+                              <div className={`absolute top-2 right-2 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all pointer-events-none ${selectedBookIds.includes(item.id) ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white/80 dark:bg-slate-900/80 border-slate-300 dark:border-slate-600'}`}>
+                                {selectedBookIds.includes(item.id) && <Check size={14} />}
+                              </div>
+                              <div className={`transition-opacity duration-200 ${selectedBookIds.includes(item.id) ? 'opacity-100' : 'opacity-60 grayscale-[0.5]'}`}>
+                                <BookCard 
+                                  book={item as Book} 
+                                  disableLink 
+                                  onClick={() => toggleBookSelection(item.id)} 
+                                  coverShape={coverShape}
+                                />
+                              </div>
+                            </>
+                          ) : (
+                            <BookCard book={item as Book} coverShape={coverShape} />
+                          )}
+                       </div>
                        )
                      ))}
                    </div>
@@ -476,10 +580,10 @@ const BookshelfPage: React.FC = () => {
           ) : (
             // Default Layout (Recent)
             <div className={`grid ${getGridCols()}`}>
-              {!isSelectionMode && filteredSeries.map((s) => (
-                <SeriesCard key={s.id} series={s} />
+              {visibleSeries.map((s) => (
+                <SeriesCard key={s.id} series={s} coverShape={coverShape} />
               ))}
-              {filteredBooks.map((book) => (
+              {visibleBooks.map((book) => (
                 <div key={book.id} className="relative">
                   {isSelectionMode ? (
                     <>
@@ -491,16 +595,20 @@ const BookshelfPage: React.FC = () => {
                           book={book} 
                           disableLink 
                           onClick={() => toggleBookSelection(book.id)} 
+                          coverShape={coverShape}
                         />
                       </div>
                     </>
                   ) : (
-                    <BookCard book={book} />
+                    <BookCard book={book} coverShape={coverShape} />
                   )}
                 </div>
               ))}
             </div>
           )}
+
+          {/* Observer target for lazy loading */}
+          <div ref={loadMoreRef} className="h-10 w-full" />
 
           {filteredBooks.length === 0 && (filteredSeries.length === 0 || (isSelectionMode && sortBy === 'createdAt')) && (
             <div className="py-20 text-center">

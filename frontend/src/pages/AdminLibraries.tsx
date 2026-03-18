@@ -14,13 +14,15 @@ import {
   Edit,
   ArrowUp,
   ArrowDown,
-  X
+  X,
+  Wifi
 } from 'lucide-react';
 
 const ScraperConfigurator = ({ 
   configStr, 
   sources, 
-  onChange
+  onChange,
+  libraryType
 }: { 
   configStr: string, 
   sources: {id: string, name: string}[], 
@@ -78,6 +80,8 @@ const ScraperConfigurator = ({
   const nfoEnabled = config.nfoWritingEnabled ?? config.nfo_writing_enabled ?? false;
   const metadataWritingEnabled = config.metadataWritingEnabled ?? config.metadata_writing_enabled ?? false;
   const preferAudioTitle = config.preferAudioTitle ?? config.prefer_audio_title ?? false;
+  const extractAudioCover = config.extractAudioCover ?? config.extract_audio_cover ?? true;
+  const disableWatcher = config.disableWatcher ?? config.disable_watcher ?? false;
 
   const handleNfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, nfoWritingEnabled: e.target.checked };
@@ -94,6 +98,20 @@ const ScraperConfigurator = ({
   const handlePreferAudioTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, preferAudioTitle: e.target.checked };
       delete newConfig.prefer_audio_title;
+      onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handleExtractAudioCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newConfig = { ...config, extractAudioCover: e.target.checked };
+      delete newConfig.extract_audio_cover;
+      onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handleDisableWatcherChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      // e.target.checked is true when user wants to ENABLE watcher
+      // so disableWatcher should be the opposite (!e.target.checked)
+      const newConfig = { ...config, disableWatcher: !e.target.checked };
+      delete newConfig.disable_watcher;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -191,6 +209,46 @@ const ScraperConfigurator = ({
             </span>
           </div>
         </div>
+
+        {/* Extract Audio Cover - Show for all libraries */}
+        <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+          <input 
+            type="checkbox" 
+            id="extract-audio-cover" 
+            checked={extractAudioCover} 
+            onChange={handleExtractAudioCoverChange}
+            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
+          />
+          <div className="flex flex-col">
+            <label htmlFor="extract-audio-cover" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+              提取音频封面
+            </label>
+            <span className="text-[10px] text-slate-400">
+              开启后，系统/插件将尝试从音频文件中提取并保存封面
+            </span>
+          </div>
+        </div>
+
+        {/* Disable Watcher - Only relevant for local libraries but we can show it */}
+        {libraryType === 'local' && (
+          <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+            <input 
+              type="checkbox" 
+              id="disable-watcher" 
+              checked={!disableWatcher} 
+              onChange={handleDisableWatcherChange}
+              className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
+            />
+            <div className="flex flex-col">
+              <label htmlFor="disable-watcher" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+                自动检测媒体库变化
+              </label>
+              <span className="text-[10px] text-slate-400">
+                开启后，将监控该媒体库目录的文件变化并自动触发扫描（修改后即时生效）
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -309,6 +367,7 @@ const AdminLibraries: React.FC = () => {
   const [isFolderMenuOpen, setIsFolderMenuOpen] = useState(false);
   const [scraperSources, setScraperSources] = useState<{id: string, name: string}[]>([]);
   const [showJsonEditor, setShowJsonEditor] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -390,6 +449,37 @@ const AdminLibraries: React.FC = () => {
       scraperConfig: scraperConfigStr
     });
     setIsModalOpen(true);
+  };
+
+  const handleTestConnection = async () => {
+    if (!formData.url) {
+      alert('请输入 WebDAV 地址');
+      return;
+    }
+    
+    setTestingConnection(true);
+    try {
+      const payload = {
+        url: formData.url,
+        username: formData.username || null,
+        password: formData.password || null
+      };
+      
+      const response = await apiClient.post('/api/libraries/test-connection', payload);
+      
+      if (response.data.success) {
+        alert('连接成功！');
+      } else {
+        alert(`${response.data.message}`);
+      }
+    } catch (err) {
+      console.error(err);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any).response?.data?.message || (err as any).message || '未知错误';
+      alert(`请求失败: ${msg}`);
+    } finally {
+      setTestingConnection(false);
+    }
   };
 
   const handleSaveLibrary = async (e: React.FormEvent) => {
@@ -693,6 +783,17 @@ const AdminLibraries: React.FC = () => {
                         placeholder="/"
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                       />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleTestConnection}
+                        disabled={testingConnection || !formData.url}
+                        className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-bold rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
+                      >
+                        {testingConnection ? <Loader2 size={16} className="animate-spin" /> : <Wifi size={16} />}
+                        测试连接
+                      </button>
                     </div>
                   </>
                 ) : (
