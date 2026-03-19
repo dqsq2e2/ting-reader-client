@@ -6,6 +6,7 @@ import BookCard from '../components/BookCard';
 import BookSelector from '../components/BookSelector';
 import { ArrowLeft, Trash2, Save, Settings, X, Plus, Filter } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
+import { usePlayerStore } from '../store/playerStore';
 
 const SeriesDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -15,6 +16,7 @@ const SeriesDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [showBookSelector, setShowBookSelector] = useState(false);
+  const { setIsSeriesEditing } = usePlayerStore();
   
   // Filter & Sort state
   const [sortBy, setSortBy] = useState<'default' | 'title' | 'author' | 'createdAt'>('default');
@@ -69,6 +71,11 @@ const SeriesDetailPage: React.FC = () => {
     fetchSeries();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Control player visibility based on editing state
+  useEffect(() => {
+    setIsSeriesEditing(isEditing);
+  }, [isEditing, setIsSeriesEditing]);
 
   const handleSortChange = (newSort: 'default' | 'title' | 'author' | 'createdAt') => {
     setSortBy(newSort);
@@ -147,7 +154,10 @@ const SeriesDetailPage: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={() => navigate(-1)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
+          <button 
+            onClick={() => isEditing ? setIsEditing(false) : navigate(-1)} 
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full"
+          >
             <ArrowLeft size={24} />
           </button>
           <h1 className="text-2xl font-bold dark:text-white">

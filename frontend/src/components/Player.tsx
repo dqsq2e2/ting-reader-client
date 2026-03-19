@@ -142,7 +142,10 @@ const Player: React.FC = () => {
     playChapter,
     setIsPlaying,
     isExpanded,
-    setIsExpanded
+    setIsExpanded,
+    isCollapsed,
+    setIsCollapsed,
+    isSeriesEditing
   } = usePlayerStore();
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -562,8 +565,15 @@ const Player: React.FC = () => {
       if (isInitialLoadRef.current) {
         const resumePosition = usePlayerStore.getState().currentTime;
         if (resumePosition > 0) {
-          console.log(`Resuming chapter ${currentChapter?.title} at ${resumePosition}s`);
-          audioRef.current.currentTime = resumePosition;
+          // If progress is very close to the end (e.g., within 2 seconds or > 99%), start from the beginning
+          if (browserDuration > 0 && (browserDuration - resumePosition < 2 || resumePosition / browserDuration > 0.99)) {
+            console.log(`Chapter ${currentChapter?.title} was already finished, starting from beginning`);
+            audioRef.current.currentTime = 0;
+            setCurrentTime(0);
+          } else {
+            console.log(`Resuming chapter ${currentChapter?.title} at ${resumePosition}s`);
+            audioRef.current.currentTime = resumePosition;
+          }
         }
       }
       
@@ -631,7 +641,7 @@ const Player: React.FC = () => {
     return `已播${percent}%`;
   };
 
-  const hiddenPaths = ['/admin', '/settings'];
+  const hiddenPaths = ['/admin', '/settings', '/downloads', '/cache'];
   const isHiddenPage = hiddenPaths.some(path => location.pathname.startsWith(path));
   const isWidgetMode = window.location.pathname.startsWith('/widget');
 
@@ -704,7 +714,7 @@ const Player: React.FC = () => {
 
   const miniPlayerStyle = !isExpanded ? { 
     bottom: isWidgetMode ? '0' : 'var(--mini-player-offset)',
-    height: isWidgetMode ? '100%' : 'var(--player-h)',
+    height: isWidgetMode ? '100%' : (isCollapsed ? '64px' : 'var(--player-h)'),
     left: isWidgetMode ? '0' : undefined,
     right: isWidgetMode ? '0' : undefined,
   } : {};
@@ -726,7 +736,7 @@ const Player: React.FC = () => {
     <div 
       className={`
         absolute transition-all duration-500 ease-in-out
-        ${isHiddenPage && !isExpanded ? 'translate-y-full opacity-0 pointer-events-none' : ''}
+        ${(isHiddenPage || isSeriesEditing) && !isExpanded ? 'translate-y-full opacity-0 pointer-events-none' : ''}
         ${isExpanded 
           ? 'inset-0 z-[110] bg-white dark:bg-slate-950' 
           : 'left-0 right-0 z-[30] bg-transparent pointer-events-none'
@@ -781,6 +791,31 @@ const Player: React.FC = () => {
       {/* Mini Player - Floating Card Style on Mobile */}
       {!isExpanded && (
         <div className={`h-full ${isWidgetMode ? 'px-0' : 'px-2 sm:px-4'} pointer-events-none`}>
+          {isCollapsed ? (
+            /* Collapsed State - Cover Only in Bottom Left */
+            <div 
+              className="h-full flex items-end justify-start pointer-events-auto pb-2 pl-2"
+              onClick={() => setIsCollapsed(false)}
+            >
+              <div 
+                className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden shadow-2xl cursor-pointer hover:scale-105 transition-transform border-2 border-white/50 dark:border-slate-700/50"
+                style={{ 
+                  borderColor: themeColor ? `${themeColor.replace('0.15', '0.3').replace('0.1', '0.3')}` : undefined
+                }}
+              >
+                <img 
+                  src={getCoverUrl(currentBook?.coverUrl, currentBook?.libraryId, currentBook?.id)} 
+                  alt={currentBook?.title}
+                  crossOrigin="anonymous"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = 'https://placehold.co/300x400?text=No+Cover';
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            /* Normal Mini Player */
           <div 
             className={`
               h-full ${isWidgetMode ? 'max-w-none rounded-none border-none shadow-none' : 'max-w-7xl mx-auto rounded-2xl sm:rounded-3xl shadow-2xl shadow-black/10 border border-slate-200/50 dark:border-slate-800/50'}
@@ -957,11 +992,12 @@ const Player: React.FC = () => {
                 )}
                 {!isWidgetMode && (
                   <button 
-                    onClick={() => setIsExpanded(true)}
+                    onClick={() => setIsCollapsed(true)}
                     className="p-2 text-slate-400 transition-colors"
                     style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                    title="收起播放器"
                   >
-                    <ChevronUp size={24} />
+                    <ChevronLeft size={24} />
                   </button>
                 )}
               </div>
@@ -1037,6 +1073,14 @@ const Player: React.FC = () => {
                 {playbackSpeed}x
               </button>
               <button 
+                onClick={() => setIsCollapsed(true)} 
+                className="text-slate-400 transition-colors p-1 hover:scale-110"
+                style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                title="收起播放器"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button 
                 onClick={() => setIsExpanded(true)} 
                 className="text-slate-400 transition-colors p-1 hover:scale-110"
                 style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
@@ -1046,6 +1090,7 @@ const Player: React.FC = () => {
               </button>
             </div>
           </div>
+          )}
         </div>
       )}
 

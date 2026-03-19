@@ -11,7 +11,8 @@ import {
   Search,
   Trash2,
   StopCircle,
-  CheckSquare
+  CheckSquare,
+  FileSignature
 } from 'lucide-react';
 import { formatDate } from '../utils/date';
 import { formatTaskPayload, getTaskStatusText } from '../utils/task';
@@ -298,14 +299,19 @@ const TaskLogsPage: React.FC = () => {
                   )}
                   
                   <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${
-                    task.taskType === 'scan' ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20' : 'bg-purple-50 text-purple-600 dark:bg-purple-900/20'
+                    task.taskType === 'scan' ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20' : 
+                    task.taskType === 'write_metadata' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20' :
+                    'bg-purple-50 text-purple-600 dark:bg-purple-900/20'
                   }`}>
-                    {task.taskType === 'scan' ? <Database size={20} className="sm:w-6 sm:h-6" /> : <Search size={20} className="sm:w-6 sm:h-6" />}
+                    {task.taskType === 'scan' ? <Database size={20} className="sm:w-6 sm:h-6" /> : 
+                     task.taskType === 'write_metadata' ? <FileSignature size={20} className="sm:w-6 sm:h-6" /> :
+                     <Search size={20} className="sm:w-6 sm:h-6" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-1">
                       <span className="font-bold text-sm sm:text-base dark:text-white truncate">
-                        {task.taskType === 'scan' ? '库扫描任务' : '刮削任务'}
+                        {task.taskType === 'scan' ? '库扫描任务' : 
+                         task.taskType === 'write_metadata' ? '元数据写入' : '刮削任务'}
                       </span>
                       <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md shrink-0 ${
                         task.status === 'completed' ? 'bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400' :
@@ -317,9 +323,9 @@ const TaskLogsPage: React.FC = () => {
                     </div>
                     <p className="text-xs sm:text-sm text-slate-500 break-all">{formatTaskPayload(task.payload)}</p>
                     {task.message && (
-                      <p className="text-xs sm:text-sm font-medium text-primary-600 dark:text-primary-400 mt-2 flex items-center gap-2">
-                        <Loader2 size={12} className={`sm:w-3.5 sm:h-3.5 ${task.status === 'running' ? 'animate-spin' : ''}`} />
-                        <span className="truncate whitespace-normal sm:whitespace-nowrap">{task.message}</span>
+                      <p className="text-xs sm:text-sm font-medium text-primary-600 dark:text-primary-400 mt-2 flex items-start sm:items-center gap-2">
+                        {task.status === 'running' && <Loader2 size={12} className="sm:w-3.5 sm:h-3.5 animate-spin shrink-0 mt-0.5 sm:mt-0" />}
+                        <span className="break-all">{task.message}</span>
                       </p>
                     )}
                     {task.error && (

@@ -10,6 +10,7 @@ const FavoritesPage: React.FC = () => {
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
+  const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
 
   useEffect(() => {
     const fetchFavorites = async () => {
@@ -23,6 +24,21 @@ const FavoritesPage: React.FC = () => {
       }
     };
     fetchFavorites();
+  }, []);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settingsRes = await apiClient.get('/api/settings');
+        const settings = settingsRes.data.settingsJson || {};
+        if (settings.bookshelfCoverShape) {
+          setCoverShape(settings.bookshelfCoverShape);
+        }
+      } catch (err) {
+        console.error('Failed to load settings', err);
+      }
+    };
+    loadSettings();
   }, []);
 
   if (loading) {
@@ -47,7 +63,7 @@ const FavoritesPage: React.FC = () => {
       {books.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
           {books.map((book) => (
-            <BookCard key={book.id} book={book} />
+            <BookCard key={book.id} book={book} coverShape={coverShape} />
           ))}
         </div>
       ) : (

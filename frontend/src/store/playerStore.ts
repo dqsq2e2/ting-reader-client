@@ -25,6 +25,8 @@ interface PlayerState {
   themeColor: string;
   clientAutoDownload: boolean;
   isExpanded: boolean;
+  isCollapsed: boolean;
+  isSeriesEditing: boolean;
   chapterProgress: Record<string, number>;
   
   // Actions
@@ -41,6 +43,8 @@ interface PlayerState {
   playChapter: (book: Book, chapters: Chapter[], chapter: Chapter, resumePosition?: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setIsExpanded: (isExpanded: boolean) => void;
+  setIsCollapsed: (isCollapsed: boolean) => void;
+  setIsSeriesEditing: (isSeriesEditing: boolean) => void;
 }
 
 export const usePlayerStore = create<PlayerState>()(
@@ -57,10 +61,14 @@ export const usePlayerStore = create<PlayerState>()(
       themeColor: '#F2EDE4',
       clientAutoDownload: false,
       isExpanded: false,
+      isCollapsed: false,
+      isSeriesEditing: false,
       chapterProgress: {},
 
       setIsPlaying: (isPlaying) => set({ isPlaying }),
       setIsExpanded: (isExpanded) => set({ isExpanded }),
+      setIsCollapsed: (isCollapsed) => set({ isCollapsed }),
+      setIsSeriesEditing: (isSeriesEditing) => set({ isSeriesEditing }),
       setClientAutoDownload: (enabled) => set({ clientAutoDownload: enabled }),
 
       playBook: (book, chapters, startChapterId) => {
