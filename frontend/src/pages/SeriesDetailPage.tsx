@@ -75,6 +75,11 @@ const SeriesDetailPage: React.FC = () => {
   // Control player visibility based on editing state
   useEffect(() => {
     setIsSeriesEditing(isEditing);
+    
+    // Cleanup: reset when component unmounts
+    return () => {
+      setIsSeriesEditing(false);
+    };
   }, [isEditing, setIsSeriesEditing]);
 
   const handleSortChange = (newSort: 'default' | 'title' | 'author' | 'createdAt') => {
