@@ -15,5 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   removeDownloadProgressListeners: () => ipcRenderer.removeAllListeners('download-progress'),
   isElectron: true,
-  listCachedFiles: () => ipcRenderer.invoke('list-cached-files')
+  listCachedFiles: () => ipcRenderer.invoke('list-cached-files'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  getVersion: () => ipcRenderer.invoke('get-version')
 });
