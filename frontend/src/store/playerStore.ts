@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Book, Chapter } from '../types';
+import { isTooLight } from '../utils/color';
 
 type ChapterProgressMeta = {
   progressUpdatedAt?: string;
@@ -101,7 +102,7 @@ export const usePlayerStore = create<PlayerState>()(
           currentTime: resume
         };
 
-        if (book.themeColor) {
+        if (book.themeColor && !isTooLight(book.themeColor)) {
           newState.themeColor = book.themeColor;
         } else {
           newState.themeColor = '#F2EDE4';
@@ -130,26 +131,33 @@ export const usePlayerStore = create<PlayerState>()(
       setThemeColor: (color) => set({ themeColor: color }),
 
       nextChapter: () => {
-        const { currentChapter, chapters, chapterProgress } = get();
-        if (!currentChapter) return;
+        const { currentChapter, chapters, chapterProgress, currentBook } = get();
+        if (!currentChapter || !currentBook) return;
+
+        // 确保 chapters 数组不为空且包含当前章节
+        if (chapters.length === 0 || !chapters.some(c => c.id === currentChapter.id)) {
+          console.warn('Chapters array is empty or does not contain current chapter, cannot proceed to next chapter');
+          return;
+        }
+
         const index = chapters.findIndex(c => c.id === currentChapter.id);
-        if (index < chapters.length - 1) {
+        if (index !== -1 && index < chapters.length - 1) {
           const next = chapters[index + 1];
           const isOffline = typeof window !== 'undefined' && (!navigator.onLine || window.location.hash.includes('/offline'));
           const resume = isOffline ? (chapterProgress[next.id] ?? getProgressPosition(next)) : getProgressPosition(next);
-          get().playChapter(get().currentBook!, chapters, next, resume);
+          get().playChapter(currentBook, chapters, next, resume);
         }
       },
 
       prevChapter: () => {
-        const { currentChapter, chapters, chapterProgress } = get();
-        if (!currentChapter) return;
+        const { currentChapter, chapters, chapterProgress, currentBook } = get();
+        if (!currentChapter || !currentBook) return;
         const index = chapters.findIndex(c => c.id === currentChapter.id);
         if (index > 0) {
           const prev = chapters[index - 1];
           const isOffline = typeof window !== 'undefined' && (!navigator.onLine || window.location.hash.includes('/offline'));
           const resume = isOffline ? (chapterProgress[prev.id] ?? getProgressPosition(prev)) : getProgressPosition(prev);
-          get().playChapter(get().currentBook!, chapters, prev, resume);
+          get().playChapter(currentBook, chapters, prev, resume);
         }
       },
 
@@ -165,8 +173,10 @@ export const usePlayerStore = create<PlayerState>()(
           currentTime: resume
         };
         
-        if (book.themeColor) {
+        if (book.themeColor && !isTooLight(book.themeColor)) {
           newState.themeColor = book.themeColor;
+        } else {
+          newState.themeColor = '#F2EDE4';
         }
 
         set(newState);

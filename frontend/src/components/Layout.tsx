@@ -151,7 +151,7 @@ const Layout: React.FC = () => {
       managementItems = [
           { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries' },
           { icon: <Puzzle size={20} />, label: '插件管理', path: '/admin/plugins' },
-          { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks' },
+          { icon: <Terminal size={20} />, label: '系统日志', path: '/admin/logs' },
           { icon: <Users size={20} />, label: '用户管理', path: '/admin/users' },
       ];
   }

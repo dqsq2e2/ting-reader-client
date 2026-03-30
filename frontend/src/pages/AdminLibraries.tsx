@@ -355,6 +355,14 @@ const ScraperConfigurator = ({
   );
 };
 
+const DEFAULT_SCRAPER_CONFIG = JSON.stringify({
+  extractAudioCover: true,
+  preferAudioTitle: false,
+  nfoWritingEnabled: false,
+  metadataWritingEnabled: false,
+  disableWatcher: false
+}, null, 2);
+
 const AdminLibraries: React.FC = () => {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [loading, setLoading] = useState(true);
@@ -377,7 +385,7 @@ const AdminLibraries: React.FC = () => {
     username: '',
     password: '',
     rootPath: '/',
-    scraperConfig: ''
+    scraperConfig: DEFAULT_SCRAPER_CONFIG
   });
 
   useEffect(() => {
@@ -392,7 +400,7 @@ const AdminLibraries: React.FC = () => {
         setScraperSources(response.data.sources);
       }
     } catch (err) {
-      console.error('Failed to fetch scraper sources', err);
+      console.error('获取刮削源失败', err);
     }
   };
 
@@ -407,7 +415,7 @@ const AdminLibraries: React.FC = () => {
       const response = await apiClient.get(`/api/storage/folders?subPath=${encodeURIComponent(subPath)}`);
       setAvailableFolders(response.data);
     } catch (err) {
-      console.error('Failed to fetch folders', err);
+      console.error('获取文件夹失败', err);
     }
   };
 
@@ -416,7 +424,7 @@ const AdminLibraries: React.FC = () => {
       const response = await apiClient.get('/api/libraries');
       setLibraries(response.data);
     } catch (err) {
-      console.error('Failed to fetch libraries', err);
+      console.error('获取库失败', err);
     } finally {
       setLoading(false);
     }
@@ -525,7 +533,7 @@ const AdminLibraries: React.FC = () => {
       }
       setIsModalOpen(false);
       setEditingId(null);
-      setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', rootPath: '/', scraperConfig: '' });
+      setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', rootPath: '/', scraperConfig: DEFAULT_SCRAPER_CONFIG });
       await fetchLibraries();
       
       // Note: Scanning is now automatically triggered by the backend upon creation.
@@ -574,10 +582,10 @@ const AdminLibraries: React.FC = () => {
           <p className="text-sm md:text-base text-slate-500 mt-1">配置您的 WebDAV 或本地存储源并同步资源</p>
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto">
-          <button 
+          <button
             onClick={() => {
               setEditingId(null);
-              setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', rootPath: '/', scraperConfig: '' });
+              setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', rootPath: '/', scraperConfig: DEFAULT_SCRAPER_CONFIG });
               setIsModalOpen(true);
             }}
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all text-sm md:text-base"

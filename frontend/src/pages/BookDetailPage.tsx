@@ -26,12 +26,12 @@ import {
   Settings,
   RefreshCw,
   Wand2,
-  FileSignature,
+  FileSignature
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { useAuthStore } from '../store/authStore';
 import ExpandableTitle from '../components/ExpandableTitle';
-import { setAlpha, toSolidColor } from '../utils/color';
+import { setAlpha, toSolidColor, isLight, isTooLight } from '../utils/color';
 
 const BookDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -60,10 +60,10 @@ const BookDetailPage: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasInitialScrolled = useRef(false);
   const [highlightedChapterId, setHighlightedChapterId] = useState<string | null>(null);
-  
+
   // User Settings
   const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
-  
+
   // Regex Generator State
   const [showRegexGenerator, setShowRegexGenerator] = useState(false);
   const [genFilename, setGenFilename] = useState('');
@@ -91,19 +91,6 @@ const BookDetailPage: React.FC = () => {
       setEditData({ ...editData, chapterRegex: genResult.regex });
       setShowRegexGenerator(false);
       setGenResult(null);
-    }
-  };
-
-  const handleWriteMetadata = async () => {
-    try {
-      if (!confirm('确定要将当前元数据写入到音频文件吗？这可能需要一些时间。')) {
-        return;
-      }
-      await apiClient.post(`/api/books/${id}/write-metadata`);
-      alert('已开始后台写入元数据，请稍候查看任务进度。');
-    } catch (err) {
-      console.error('Failed to write metadata', err);
-      alert('写入失败');
     }
   };
 
@@ -180,14 +167,14 @@ const BookDetailPage: React.FC = () => {
         setChapters(chaptersRes.data);
         setIsFavorite(fetchedBook.isFavorite);
         setCurrentGroupIndex(0); // Reset group index when book changes
-        
+
         // Load user settings
         const settings = settingsRes.data.settingsJson || {};
         if (settings.bookshelfCoverShape) {
           setCoverShape(settings.bookshelfCoverShape);
         }
       } catch (err) {
-        console.error('Failed to fetch book details', err);
+        console.error('获取书籍详情失败', err);
       } finally {
         setLoading(false);
       }
@@ -344,7 +331,20 @@ const BookDetailPage: React.FC = () => {
       }
       setIsFavorite(!isFavorite);
     } catch (err) {
-      console.error('Failed to toggle favorite', err);
+      console.error('切换收藏状态失败', err);
+    }
+  };
+
+  const handleWriteMetadata = async () => {
+    try {
+      if (!confirm('确定要将当前元数据写入到音频文件吗？这可能需要一些时间。')) {
+        return;
+      }
+      await apiClient.post(`/api/books/${id}/write-metadata`);
+      alert('已开始后台写入元数据，请稍候查看任务进度。');
+    } catch (err) {
+      console.error('写入元数据失败', err);
+      alert('写入失败');
     }
   };
 
@@ -400,7 +400,7 @@ const BookDetailPage: React.FC = () => {
       await apiClient.delete(`/api/books/${id}?deleteFiles=${deleteSourceFiles}`);
       navigate('/', { replace: true });
     } catch (err) {
-      console.error('Failed to delete book', err);
+      console.error('删除书籍失败', err);
       alert('删除书籍失败');
     } finally {
       setDeleting(false);
@@ -430,20 +430,23 @@ const BookDetailPage: React.FC = () => {
   };
 
   const displayThemeColor = book ? (book.themeColor || themeColor) : themeColor;
+  // If the color is too light (close to white), we ignore it and use default to ensure text readability
+  const effectiveThemeColor = displayThemeColor && !isTooLight(displayThemeColor) ? displayThemeColor : undefined;
+
   const displayCoverUrl = book ? book.coverUrl : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const displayLibraryId = book ? (book.libraryId || (book as any).library_id) : undefined;
   const displayLibraryType = book ? book.libraryType : undefined;
 
   useEffect(() => {
-    if (displayThemeColor) {
-      const bgColor = setAlpha(displayThemeColor, 0.05);
+    if (effectiveThemeColor) {
+      const bgColor = setAlpha(effectiveThemeColor, 0.05);
       document.documentElement.style.setProperty('--page-background', bgColor);
     }
     return () => {
       document.documentElement.style.removeProperty('--page-background');
     };
-  }, [displayThemeColor]);
+  }, [effectiveThemeColor]);
 
   if (loading && !book) {
     return (
@@ -551,9 +554,10 @@ const BookDetailPage: React.FC = () => {
               <button 
                 onClick={handlePlayClick}
                 className="w-full flex items-center justify-center gap-2 px-5 sm:px-8 py-3.5 sm:py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group"
-                style={displayThemeColor ? { 
-                  backgroundColor: toSolidColor(displayThemeColor),
-                  boxShadow: `0 10px 20px -5px ${setAlpha(displayThemeColor, 0.3)}`
+                style={effectiveThemeColor ? { 
+                  backgroundColor: toSolidColor(effectiveThemeColor),
+                  boxShadow: `0 10px 20px -5px ${setAlpha(effectiveThemeColor, 0.3)}`,
+                  color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
                 } : {}}
               >
                 <Play size={18} fill="currentColor" />
@@ -607,8 +611,8 @@ const BookDetailPage: React.FC = () => {
 
             <div 
               className="mt-auto space-y-3 p-4 rounded-2xl border border-slate-100 dark:border-slate-800/50 relative group/desc"
-              style={displayThemeColor ? { 
-                  backgroundColor: setAlpha(displayThemeColor, 0.08)
+              style={effectiveThemeColor ? { 
+                  backgroundColor: setAlpha(effectiveThemeColor, 0.08)
                 } : {}}
               >
               <div className="flex items-center justify-between">
@@ -660,46 +664,44 @@ const BookDetailPage: React.FC = () => {
             )}
           </h2>
           
-          <div className="flex items-center gap-2 self-start">
-            {extraChapters.length > 0 && (
-              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-                <button 
-                  onClick={() => { setActiveTab('main'); setCurrentGroupIndex(0); }}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                    activeTab === 'main' 
-                      ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
-                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                  }`}
-                >
-                  正文 ({mainChapters.length})
-                </button>
-                <button 
-                  onClick={() => { setActiveTab('extra'); setCurrentGroupIndex(0); }}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                    activeTab === 'extra' 
-                      ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
-                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                  }`}
-                >
-                  番外 ({extraChapters.length})
-                </button>
-              </div>
-            )}
-          </div>
+          {extraChapters.length > 0 && (
+            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start">
+              <button 
+                onClick={() => { setActiveTab('main'); setCurrentGroupIndex(0); }}
+                className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                  activeTab === 'main' 
+                    ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                正文 ({mainChapters.length})
+              </button>
+              <button 
+                onClick={() => { setActiveTab('extra'); setCurrentGroupIndex(0); }}
+                className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                  activeTab === 'extra' 
+                    ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                番外 ({extraChapters.length})
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Chapter Groups Selector */}
         {groups.length > 1 && (
-          <div className="relative group/nav mb-6">
+          <div className="relative group/nav mb-6 flex items-center">
             <button 
               onClick={() => scrollGroups('left')}
-              className="absolute left-0 top-1/2 -translate-y-1/2 z-10 p-1 bg-white/80 dark:bg-slate-800/80 backdrop-blur shadow-md rounded-r-xl opacity-0 group-hover/nav:opacity-100 transition-opacity hidden sm:block"
+              className="absolute -left-4 sm:-left-7 top-1/2 -translate-y-1/2 z-10 p-1 bg-white/90 dark:bg-slate-800/90 backdrop-blur shadow-md rounded-full opacity-0 group-hover/nav:opacity-100 transition-opacity hidden sm:block border border-slate-100 dark:border-slate-700"
             >
               <ChevronLeft size={20} className="text-slate-600 dark:text-slate-400" />
             </button>
             <div 
               ref={scrollRef}
-              className="flex gap-2 overflow-x-auto no-scrollbar scroll-smooth snap-x pb-2"
+              className="flex gap-2 overflow-x-auto no-scrollbar scroll-smooth snap-x pb-2 px-1 mx-1 w-full"
             >
               {groups.map((group, index) => (
                 <button
@@ -708,12 +710,13 @@ const BookDetailPage: React.FC = () => {
                   onClick={() => setCurrentGroupIndex(index)}
                 className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border shrink-0 snap-start ${
                   currentGroupIndex === index
-                    ? 'text-white shadow-lg shadow-black/10'
+                    ? `text-white shadow-lg shadow-black/10 ${!effectiveThemeColor ? 'bg-primary-600 border-primary-600' : ''}`
                     : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
                 }`}
-                style={currentGroupIndex === index && displayThemeColor ? { 
-                  backgroundColor: toSolidColor(displayThemeColor),
-                  borderColor: toSolidColor(displayThemeColor)
+                style={currentGroupIndex === index && effectiveThemeColor ? { 
+                  backgroundColor: toSolidColor(effectiveThemeColor),
+                  borderColor: toSolidColor(effectiveThemeColor),
+                  color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
                 } : {}}
               >
                 第 {group.start}-{group.end} 章
@@ -722,7 +725,7 @@ const BookDetailPage: React.FC = () => {
             </div>
             <button 
               onClick={() => scrollGroups('right')}
-              className="absolute right-0 top-1/2 -translate-y-1/2 z-10 p-1 bg-white/80 dark:bg-slate-800/80 backdrop-blur shadow-md rounded-l-xl opacity-0 group-hover/nav:opacity-100 transition-opacity hidden sm:block"
+              className="absolute -right-4 sm:-right-7 top-1/2 -translate-y-1/2 z-10 p-1 bg-white/90 dark:bg-slate-800/90 backdrop-blur shadow-md rounded-full opacity-0 group-hover/nav:opacity-100 transition-opacity hidden sm:block border border-slate-100 dark:border-slate-700"
             >
               <ChevronLeft size={20} className="rotate-180 text-slate-600 dark:text-slate-400" />
             </button>
@@ -739,32 +742,35 @@ const BookDetailPage: React.FC = () => {
               <div 
                 key={chapter.id}
                 id={`chapter-${chapter.id}`}
+                onClick={() => playChapter(book!, currentChapters, chapter)}
                 className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
                   isActive 
                     ? 'bg-opacity-10 border-opacity-20' 
                     : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary-200 dark:hover:border-primary-800'
                 }`}
-                style={isActive && displayThemeColor ? { 
-                  backgroundColor: setAlpha(displayThemeColor, 0.1),
-                  borderColor: setAlpha(displayThemeColor, 0.3),
+                style={isActive && effectiveThemeColor ? { 
+                  backgroundColor: setAlpha(effectiveThemeColor, 0.1),
+                  borderColor: setAlpha(effectiveThemeColor, 0.3),
                 } : {}}
               >
                 <div 
                   className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 cursor-pointer"
-                  onClick={() => playChapter(book!, currentChapters, chapter)}
                 >
                   <div 
                     className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
-                      isActive ? 'text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                      isActive ? `text-white ${!effectiveThemeColor ? 'bg-primary-600' : ''}` : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                     }`}
-                    style={isActive && displayThemeColor ? { backgroundColor: toSolidColor(displayThemeColor) } : {}}
+                    style={isActive && effectiveThemeColor ? { 
+                      backgroundColor: toSolidColor(effectiveThemeColor),
+                      color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
+                    } : {}}
                   >
-                    {chapter.chapterIndex || (actualIndex + 1)}
+                    {chapter.chapter_index || (actualIndex + 1)}
                   </div>
                   <div className="min-w-0">
                     <p 
                       className={`font-bold truncate ${isActive ? '' : 'text-slate-900 dark:text-white'}`}
-                      style={isActive && displayThemeColor ? { color: toSolidColor(displayThemeColor) } : {}}
+                      style={isActive && effectiveThemeColor ? { color: toSolidColor(effectiveThemeColor) } : {}}
                     >
                       {chapter.title}
                     </p>
@@ -788,27 +794,23 @@ const BookDetailPage: React.FC = () => {
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-2 pl-2 ml-2 sm:gap-4 sm:pl-4 sm:ml-4 border-l border-slate-100 dark:border-slate-800 transition-all">
+                <div className="flex items-center gap-4">
                   {isCurrent && isPlaying ? (
                     <div className="flex gap-1 items-end h-5">
-                      <div className="w-1 animate-music-bar-1 rounded-full" style={displayThemeColor ? { backgroundColor: toSolidColor(displayThemeColor) } : {}}></div>
-                      <div className="w-1 animate-music-bar-2 rounded-full" style={displayThemeColor ? { backgroundColor: toSolidColor(displayThemeColor) } : {}}></div>
-                      <div className="w-1 animate-music-bar-3 rounded-full" style={displayThemeColor ? { backgroundColor: toSolidColor(displayThemeColor) } : {}}></div>
+                      <div className={`w-1 animate-music-bar-1 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
+                      <div className={`w-1 animate-music-bar-2 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
+                      <div className={`w-1 animate-music-bar-3 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
                     </div>
                   ) : (
-                    <button
+                    <div 
+                      className="w-10 h-10 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer hover:scale-105"
                       onClick={(e) => {
                         e.stopPropagation();
                         playChapter(book!, currentChapters, chapter);
                       }}
-                      className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-50 dark:bg-slate-800 items-center justify-center transition-all hover:scale-105 ${
-                        isActive 
-                          ? 'flex opacity-100' 
-                          : 'hidden sm:flex opacity-0 group-hover:opacity-100'
-                      }`}
                     >
-                      <Play size={16} className="text-primary-600 ml-1" fill="currentColor" style={displayThemeColor ? { color: toSolidColor(displayThemeColor) } : {}} />
-                    </button>
+                      <Play size={16} className="text-primary-600 ml-1" fill="currentColor" style={effectiveThemeColor ? { color: toSolidColor(effectiveThemeColor) } : {}} />
+                    </div>
                   )}
                 </div>
               </div>
@@ -1067,8 +1069,8 @@ const BookDetailPage: React.FC = () => {
                 <div className="flex gap-2 sm:gap-3">
                   <button 
                     onClick={handleWriteMetadata}
-                    className="flex-1 sm:flex-none px-2.5 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-xs sm:text-base flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
-                    title="将当前元数据写入到源文件"
+                    className="flex-1 sm:flex-none px-2.5 sm:px-6 py-2.5 sm:py-3 font-bold text-primary-600 bg-primary-50 hover:bg-primary-100 dark:bg-primary-900/20 dark:hover:bg-primary-900/30 rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-base whitespace-nowrap"
+                    title="将元数据写入音频文件"
                   >
                     <FileSignature size={16} className="sm:w-5 sm:h-5" />
                     写入文件

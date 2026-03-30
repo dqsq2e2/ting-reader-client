@@ -26,7 +26,7 @@ import {
   Check
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
-import { toSolidColor, isLight } from '../utils/color';
+import { setAlpha, toSolidColor, isLight, isTooLight } from '../utils/color';
 
 interface ProgressBarProps {
   isMini?: boolean;
@@ -54,19 +54,20 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
   onSeekEnd
 }) => {
   const displayTime = isSeeking ? seekTime : currentTime;
-  const playedPercent = (displayTime / (duration || 1)) * 100;
-  const bufferedPercent = (bufferedTime / (duration || 1)) * 100;
+  const playedPercent = (Number.isFinite(duration) && duration > 0) ? (displayTime / duration) * 100 : 0;
+  const bufferedPercent = (Number.isFinite(duration) && duration > 0) ? (bufferedTime / duration) * 100 : 0;
   
-  // Safety check for themeColor
-  const safeThemeColor = themeColor || 'rgba(0,0,0,0.15)';
-  const barColor = safeThemeColor ? safeThemeColor.replace('0.15', '1.0').replace('0.1', '1.0') : undefined;
+  // Filter out light colors
+  const effectiveThemeColor = themeColor && !isTooLight(themeColor) ? themeColor : undefined;
+
+  const barColor = effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined;
+  const shadowColor = effectiveThemeColor ? setAlpha(effectiveThemeColor, 0.4) : undefined;
   
   return (
-    <div className={`relative group/progress ${isMini ? 'flex-1 h-3 sm:h-2' : 'w-full h-4'} flex items-center select-none touch-none`}>
+    <div className={`relative group/progress ${isMini ? 'flex-1 w-full h-3 sm:h-2' : 'w-full h-4'} flex items-center select-none touch-none`}>
       {/* Track Background */}
       <div 
         className={`absolute left-0 right-0 top-1/2 -translate-y-1/2 ${isMini ? 'h-1' : 'h-1.5'} bg-slate-300 dark:bg-slate-900 rounded-full overflow-hidden`}
-        // Keeping the original logic for background color if needed, or simplifying
       >
         {/* Buffered Bar */}
         <div 
@@ -75,11 +76,11 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
         />
         {/* Played Bar */}
         <div 
-          className="absolute inset-y-0 left-0 z-10" 
+          className={`absolute inset-y-0 left-0 z-10 ${!barColor ? 'bg-primary-600' : ''}`}
           style={{ 
             width: `${playedPercent}%`,
             backgroundColor: barColor,
-            boxShadow: safeThemeColor ? `0 0 10px ${safeThemeColor.replace('0.15', '0.4').replace('0.1', '0.4')}` : undefined
+            boxShadow: shadowColor ? `0 0 10px ${shadowColor}` : undefined
           }}
         />
       </div>
@@ -99,7 +100,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
       <input 
         type="range" 
         min="0" 
-        max={duration || 0} 
+        max={Number.isFinite(duration) ? duration : 0} 
         step="any"
         value={displayTime} 
         onInput={onSeek}
@@ -173,6 +174,23 @@ const Player: React.FC = () => {
   const [editSkipIntro, setEditSkipIntro] = useState(0);
   const [editSkipOutro, setEditSkipOutro] = useState(0);
 
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
+  const effectiveThemeColor = themeColor && !isTooLight(themeColor) ? themeColor : undefined;
+  // Always use the theme color for the mini player progress bar, even in dark mode
+  const miniPlayerThemeColor = effectiveThemeColor;
+  // Determine if we should use dark mode text colors (white/gray) for controls
+  // In dark mode, we always want bright white/gray for contrast
+  const useDarkControls = isDark;
+
   // Use stored theme color from book to avoid flash
   useEffect(() => {
     if (currentBook?.themeColor) {
@@ -182,11 +200,16 @@ const Player: React.FC = () => {
       const url = getCoverUrl(currentBook.coverUrl, currentBook.libraryId, currentBook.id);
       fac.getColorAsync(url, { algorithm: 'dominant' })
         .then(color => {
-          setThemeColor(color.rgba);
+          setThemeColor(color.hex);
+          // Update the store's currentBook locally so it persists in this session and avoids re-extraction
+          usePlayerStore.setState(state => ({
+            currentBook: state.currentBook ? {
+              ...state.currentBook,
+              themeColor: color.hex
+            } : null
+          }));
         })
-        .catch(() => {
-          // Ignore errors
-        });
+        .catch(e => console.warn('在播放器中从封面提取颜色失败', e));
     }
   }, [currentBook?.id, currentBook?.themeColor, currentBook?.coverUrl, currentBook?.libraryId, setThemeColor]);
 
@@ -246,7 +269,9 @@ const Player: React.FC = () => {
   }, [currentChapters]);
 
   const [sleepTimer, setSleepTimer] = useState<number | null>(null);
+  const sleepTimerEndTimeRef = useRef<number | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sleepTimerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerMenuRef = useRef<HTMLDivElement>(null);
 
   const [error, setError] = useState<string | null>(null);
@@ -286,14 +311,35 @@ const Player: React.FC = () => {
     }).catch(err => console.error('Failed to fetch settings', err));
   }, []);
 
+  // 对章节数据按 chapterIndex 排序的辅助函数
+  const sortChaptersByIndex = (chapters: Chapter[]) => {
+    return [...chapters].sort((a, b) => (a.chapterIndex || 0) - (b.chapterIndex || 0));
+  };
+
   // Fetch chapters for the current book
   useEffect(() => {
     if (currentBook?.id) {
       if (!navigator.onLine) return;
       apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
-        setChapters(res.data);
+        const sortedChapters = sortChaptersByIndex(res.data);
+        setChapters(sortedChapters);
         setCurrentGroupIndex(0); // Reset group index when book changes
+        // 更新 store 中的 chapters 数据，确保 nextChapter 函数能正确工作
+        usePlayerStore.setState({ chapters: sortedChapters });
       }).catch(err => console.error('Failed to fetch chapters', err));
+    }
+  }, [currentBook?.id]);
+
+  // 当组件加载时，如果 currentBook 存在但 store 中的 chapters 数组为空，主动获取章节数据
+  useEffect(() => {
+    const storeChapters = usePlayerStore.getState().chapters;
+    if (currentBook?.id && storeChapters.length === 0) {
+      if (!navigator.onLine) return;
+      apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
+        const sortedChapters = sortChaptersByIndex(res.data);
+        setChapters(sortedChapters);
+        usePlayerStore.setState({ chapters: sortedChapters });
+      }).catch(err => console.error('获取章节失败', err));
     }
   }, [currentBook?.id]);
 
@@ -484,22 +530,48 @@ const Player: React.FC = () => {
 
   // Handle Sleep Timer Countdown
   useEffect(() => {
-    if (sleepTimer === null || sleepTimer <= 0 || !isPlaying) return;
+    if (sleepTimer === null || sleepTimer <= 0 || !isPlaying || !sleepTimerEndTimeRef.current) return;
 
+    // Clear any existing interval
+    if (sleepTimerIntervalRef.current) {
+      clearInterval(sleepTimerIntervalRef.current);
+    }
+
+    // Set up new interval to update remaining time based on end time
     const interval = setInterval(() => {
-      setSleepTimer(prev => {
-        if (prev === null) return prev;
-        if (prev <= 1) {
-          if (isPlayingRef.current) {
-            togglePlay();
-          }
-          return null;
-        }
-        return prev - 1;
-      });
+      if (sleepTimerEndTimeRef.current) {
+        const remaining = Math.max(0, Math.floor((sleepTimerEndTimeRef.current - Date.now()) / 1000));
+        setSleepTimer(remaining);
+      }
     }, 1000);
 
-    return () => clearInterval(interval);
+    sleepTimerIntervalRef.current = interval;
+
+    return () => {
+      if (sleepTimerIntervalRef.current) {
+        clearInterval(sleepTimerIntervalRef.current);
+        sleepTimerIntervalRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sleepTimer === null, isPlaying]);
+
+  // Handle Sleep Timer Expiration
+  useEffect(() => {
+    if (sleepTimer === 0) {
+      if (isPlaying) {
+        togglePlay();
+      }
+      
+      // Reset sleep timer references
+      sleepTimerEndTimeRef.current = null;
+      if (sleepTimerIntervalRef.current) {
+        clearInterval(sleepTimerIntervalRef.current);
+        sleepTimerIntervalRef.current = null;
+      }
+      
+      setTimeout(() => setSleepTimer(null), 0);
+    }
   }, [sleepTimer, isPlaying, togglePlay]);
 
   useEffect(() => {
@@ -800,7 +872,7 @@ const Player: React.FC = () => {
               <div 
                 className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden shadow-2xl cursor-pointer hover:scale-105 transition-transform border-2 border-white/50 dark:border-slate-700/50"
                 style={{ 
-                  borderColor: themeColor ? `${themeColor.replace('0.15', '0.3').replace('0.1', '0.3')}` : undefined
+                  borderColor: miniPlayerThemeColor ? setAlpha(miniPlayerThemeColor, 0.3) : undefined
                 }}
               >
                 <img 
@@ -820,16 +892,16 @@ const Player: React.FC = () => {
             className={`
               h-full ${isWidgetMode ? 'max-w-none rounded-none border-none shadow-none' : 'max-w-7xl mx-auto rounded-2xl sm:rounded-3xl shadow-2xl shadow-black/10 border border-slate-200/50 dark:border-slate-800/50'}
               bg-white/95 dark:bg-slate-900/95 backdrop-blur-md 
-              flex items-center justify-between ${isWidgetMode ? 'px-3 max-[380px]:flex-col max-[380px]:justify-center max-[380px]:gap-1.5 max-[380px]:py-2' : 'px-3 sm:px-6'} pointer-events-auto
+              flex items-center justify-between gap-3 sm:gap-4 ${isWidgetMode ? 'px-3 max-[380px]:flex-col max-[380px]:justify-center max-[380px]:gap-1.5 max-[380px]:py-2' : 'px-3 sm:px-6'} pointer-events-auto
               transition-all duration-300
             `}
             style={{ 
-              backgroundColor: isWidgetMode ? undefined : (themeColor ? `${themeColor.replace('0.15', '0.05').replace('0.1', '0.05')}` : undefined),
-              borderColor: isWidgetMode ? undefined : (themeColor ? `${themeColor.replace('0.15', '0.2').replace('0.1', '0.2')}` : undefined)
+              backgroundColor: isWidgetMode ? undefined : (miniPlayerThemeColor ? setAlpha(miniPlayerThemeColor, 0.05) : undefined),
+              borderColor: isWidgetMode ? undefined : (miniPlayerThemeColor ? setAlpha(miniPlayerThemeColor, 0.2) : undefined)
             }}
           >
             {/* Info */}
-            <div className={`flex items-center gap-2 sm:gap-3 min-w-0 ${isWidgetMode ? 'max-[380px]:w-full max-[380px]:max-w-none' : ''} max-w-[100px] max-[380px]:max-w-[140px] sm:max-w-[200px] md:max-w-[240px] lg:max-w-[320px] md:flex-none flex-1`}>
+            <div className={`flex items-center gap-2 sm:gap-3 min-w-0 ${isWidgetMode ? 'max-[380px]:w-full max-[380px]:max-w-none' : ''} max-[500px]:max-w-[48px] max-[380px]:max-w-[40px] sm:max-w-[200px] md:max-w-[240px] lg:max-w-[320px] md:flex-none flex-1`}>
               <div 
                 className="w-12 h-12 max-[380px]:w-10 max-[380px]:h-10 sm:w-16 sm:h-16 rounded-lg sm:rounded-xl overflow-hidden shadow-md cursor-pointer shrink-0"
                 onClick={toggleFullscreen}
@@ -844,7 +916,7 @@ const Player: React.FC = () => {
                   }}
                 />
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 hidden min-[500px]:block md:block max-[380px]:hidden">
                 <h4 className="font-bold dark:text-white truncate text-sm max-[380px]:text-xs">{currentBook?.title}</h4>
                 <p className="text-slate-500 truncate text-xs max-[380px]:text-[10px]">{currentChapter.title}</p>
               </div>
@@ -854,17 +926,17 @@ const Player: React.FC = () => {
             {isWidgetMode && (
               <div className="hidden max-[380px]:block w-full px-1 py-1">
                  <ProgressBar 
-                  isMini={true} 
-                  isSeeking={isSeeking}
-                  seekTime={seekTime}
-                  currentTime={currentTime}
-                  duration={duration}
-                  bufferedTime={bufferedTime}
-                  themeColor={themeColor}
+                   isMini={true} 
+                   isSeeking={isSeeking}
+                   seekTime={seekTime}
+                   currentTime={currentTime}
+                   duration={duration}
+                   bufferedTime={bufferedTime}
+                  themeColor={miniPlayerThemeColor}
                   onSeek={handleSeek}
-                  onSeekStart={handleSeekStart}
-                  onSeekEnd={handleSeekEnd}
-                />
+                   onSeekStart={handleSeekStart}
+                   onSeekEnd={handleSeekEnd}
+                 />
               </div>
             )}
 
@@ -873,39 +945,40 @@ const Player: React.FC = () => {
               <div className="flex items-center gap-6">
                 <button 
                   onClick={prevChapter} 
-                  className="text-slate-400 hover:scale-110 transition-all"
-                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                  className="text-slate-400 dark:text-slate-300 hover:scale-110 transition-all"
+                  style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                 >
                   <SkipBack size={20} fill="currentColor" />
                 </button>
                 <button 
                   onClick={() => { if (audioRef.current) audioRef.current.currentTime -= 15; }}
-                  className="text-slate-400 hover:scale-110 transition-all"
-                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                  className="text-slate-400 dark:text-slate-300 hover:scale-110 transition-all"
+                  style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                 >
                   <RotateCcw size={18} />
                 </button>
-                <button 
-                  onClick={togglePlay}
-                  className="w-10 h-10 rounded-full text-white flex items-center justify-center shadow-lg hover:scale-105 transition-all"
-                  style={{ 
-                    backgroundColor: themeColor ? themeColor.replace('0.15', '1.0').replace('0.1', '1.0') : undefined,
-                    boxShadow: themeColor ? `0 10px 15px -3px ${themeColor.replace('0.15', '0.3').replace('0.1', '0.3')}` : undefined
-                  }}
-                >
+                <button
+                    onClick={togglePlay}
+                      className={`w-10 h-10 rounded-full text-white flex items-center justify-center shadow-lg hover:scale-105 transition-all ${!effectiveThemeColor ? 'bg-primary-600 dark:bg-primary-600' : ''}`}
+                      style={{ 
+                        backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined,
+                        boxShadow: effectiveThemeColor ? `0 10px 15px -3px ${setAlpha(effectiveThemeColor, 0.3)}` : undefined,
+                        color: (effectiveThemeColor && isLight(effectiveThemeColor)) ? '#475569' : (effectiveThemeColor ? '#ffffff' : undefined)
+                      }}
+                  >
                   {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
                 </button>
                 <button 
                   onClick={() => { if (audioRef.current) audioRef.current.currentTime += 30; }}
-                  className="text-slate-400 hover:scale-110 transition-all"
-                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                  className="text-slate-400 dark:text-slate-300 hover:scale-110 transition-all"
+                  style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                 >
                   <RotateCw size={18} />
                 </button>
                 <button 
                   onClick={nextChapter} 
-                  className="text-slate-400 hover:scale-110 transition-all"
-                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                  className="text-slate-400 dark:text-slate-300 hover:scale-110 transition-all"
+                  style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                 >
                   <SkipForward size={20} fill="currentColor" />
                 </button>
@@ -920,7 +993,7 @@ const Player: React.FC = () => {
                   currentTime={currentTime}
                   duration={duration}
                   bufferedTime={bufferedTime}
-                  themeColor={themeColor}
+                  themeColor={miniPlayerThemeColor}
                   onSeek={handleSeek}
                   onSeekStart={handleSeekStart}
                   onSeekEnd={handleSeekEnd}
@@ -931,7 +1004,7 @@ const Player: React.FC = () => {
 
             {/* Mobile Controls - Only visible on small screens */}
             <div className={`flex md:hidden items-center gap-2 sm:gap-3 flex-1 min-w-0 justify-end ${isWidgetMode ? 'max-[380px]:w-full max-[380px]:justify-center max-[380px]:gap-6 max-[380px]:flex-none' : ''}`}>
-              <div className="flex-1 min-w-0 h-1.5 py-4 block max-[380px]:hidden">
+              <div className={`flex-1 min-w-0 h-1.5 py-4 flex items-center w-full ${isWidgetMode ? 'max-[380px]:hidden' : ''}`}>
                 <ProgressBar 
                   isMini={true} 
                   isSeeking={isSeeking}
@@ -939,7 +1012,7 @@ const Player: React.FC = () => {
                   currentTime={currentTime}
                   duration={duration}
                   bufferedTime={bufferedTime}
-                  themeColor={themeColor}
+                  themeColor={miniPlayerThemeColor}
                   onSeek={handleSeek}
                   onSeekStart={handleSeekStart}
                   onSeekEnd={handleSeekEnd}
@@ -950,15 +1023,15 @@ const Player: React.FC = () => {
                   <div className="flex items-center gap-1">
                     <button 
                       onClick={() => { if (audioRef.current) audioRef.current.currentTime -= 15; }}
-                      className="p-1.5 text-slate-400 transition-colors hover:text-primary-500"
-                      style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                      className="p-1.5 text-slate-400 dark:text-slate-300 transition-colors hover:text-primary-500"
+                      style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                     >
                       <RotateCcw size={16} />
                     </button>
                     <button 
                       onClick={prevChapter}
-                      className="p-1.5 text-slate-400 transition-colors hover:text-primary-500"
-                      style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                      className="p-1.5 text-slate-400 dark:text-slate-300 transition-colors hover:text-primary-500"
+                      style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                     >
                       <SkipBack size={16} fill="currentColor" />
                     </button>
@@ -966,8 +1039,11 @@ const Player: React.FC = () => {
                 )}
                 <button 
                   onClick={togglePlay}
-                  className="w-10 h-10 max-[380px]:w-8 max-[380px]:h-8 rounded-full text-white flex items-center justify-center shadow-md hover:scale-105 transition-transform"
-                  style={{ backgroundColor: themeColor ? themeColor.replace('0.15', '1.0').replace('0.1', '1.0') : undefined }}
+                  className={`w-10 h-10 max-[380px]:w-8 max-[380px]:h-8 rounded-full text-white flex items-center justify-center shadow-md hover:scale-105 transition-transform ${!effectiveThemeColor ? 'bg-primary-600 dark:bg-primary-600' : ''}`}
+                  style={{ 
+                    backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined,
+                    color: (effectiveThemeColor && isLight(effectiveThemeColor)) ? '#475569' : (effectiveThemeColor ? '#ffffff' : undefined)
+                  }}
                 >
                   {isPlaying ? <Pause size={20} className="max-[380px]:w-4 max-[380px]:h-4" fill="currentColor" /> : <Play size={20} className="ml-1 max-[380px]:w-4 max-[380px]:h-4" fill="currentColor" />}
                 </button>
@@ -976,15 +1052,15 @@ const Player: React.FC = () => {
                     {/* Always show Next button */}
                     <button 
                       onClick={nextChapter}
-                      className="p-1.5 text-slate-400 transition-colors hover:text-primary-500"
-                      style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                      className="p-1.5 text-slate-400 dark:text-slate-300 transition-colors hover:text-primary-500"
+                      style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                     >
                       <SkipForward size={16} fill="currentColor" />
                     </button>
                     <button 
                       onClick={() => { if (audioRef.current) audioRef.current.currentTime += 30; }}
-                      className="p-1.5 text-slate-400 transition-colors hover:text-primary-500"
-                      style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                      className="p-1.5 text-slate-400 dark:text-slate-300 transition-colors hover:text-primary-500"
+                      style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                     >
                       <RotateCw size={16} />
                     </button>
@@ -993,8 +1069,8 @@ const Player: React.FC = () => {
                 {!isWidgetMode && (
                   <button 
                     onClick={() => setIsCollapsed(true)}
-                    className="p-2 text-slate-400 transition-colors"
-                    style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                    className="p-2 text-slate-400 dark:text-slate-300 transition-colors"
+                    style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                     title="收起播放器"
                   >
                     <ChevronLeft size={24} />
@@ -1012,8 +1088,8 @@ const Player: React.FC = () => {
                     e.stopPropagation();
                     setShowVolumeControl(!showVolumeControl);
                   }}
-                  className="text-slate-400 transition-colors p-1 hover:scale-110 flex items-center gap-1"
-                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                  className={`transition-colors p-1 hover:scale-110 flex items-center gap-1 ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
+                  style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                   title="音量"
                 >
                   {isMuted || volume === 0 ? (
@@ -1064,26 +1140,26 @@ const Player: React.FC = () => {
 
               <button 
                 onClick={() => setPlaybackSpeed(playbackSpeed === 2 ? 1 : playbackSpeed + 0.25)} 
-                className="text-[10px] font-bold px-2 py-1 rounded transition-colors"
+                className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${useDarkControls ? 'text-slate-200 hover:text-white' : 'dark:text-slate-300'}`}
                 style={{ 
-                  backgroundColor: themeColor ? themeColor.replace('0.15', '0.1').replace('0.1', '0.1') : undefined,
-                  color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.8').replace('0.1', '0.8')) : undefined
+                  backgroundColor: (miniPlayerThemeColor && !useDarkControls) ? setAlpha(miniPlayerThemeColor, 0.1) : undefined,
+                  color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.8)) : undefined
                 }}
               >
                 {playbackSpeed}x
               </button>
               <button 
                 onClick={() => setIsCollapsed(true)} 
-                className="text-slate-400 transition-colors p-1 hover:scale-110"
-                style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                className={`transition-colors p-1 hover:scale-110 ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
+                style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                 title="收起播放器"
               >
                 <ChevronLeft size={20} />
               </button>
               <button 
                 onClick={() => setIsExpanded(true)} 
-                className="text-slate-400 transition-colors p-1 hover:scale-110"
-                style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : themeColor.replace('0.15', '0.6').replace('0.1', '0.6')) : undefined }}
+                className={`transition-colors p-1 hover:scale-110 ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
+                style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                 title="展开播放器"
               >
                 <Maximize2 size={20} />
@@ -1097,8 +1173,8 @@ const Player: React.FC = () => {
       {/* Expanded Player View */}
       {isExpanded && (
         <div 
-          className="absolute inset-0 flex flex-col p-4 sm:p-8 md:p-12 overflow-y-auto animate-in slide-in-from-bottom duration-500 pb-40 xl:pb-12"
-          style={{ backgroundColor: isWidgetMode ? (themeColor ? toSolidColor(themeColor) : '#1e293b') : (themeColor || '#F2EDE4') }}
+          className="absolute inset-0 flex flex-col p-4 sm:p-8 md:p-12 overflow-y-auto animate-in slide-in-from-bottom duration-500 pb-40 xl:pb-12 bg-white dark:bg-slate-950"
+          style={{ backgroundColor: isWidgetMode ? (effectiveThemeColor ? toSolidColor(effectiveThemeColor) : '#1e293b') : (effectiveThemeColor ? setAlpha(effectiveThemeColor, 0.05) : undefined) }}
         >
           {/* Header */}
           <div className="flex items-center justify-between w-full max-w-4xl mx-auto mb-4 sm:mb-8 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-2 sm:p-3 rounded-2xl shadow-sm border border-slate-200/30 dark:border-slate-800/30">
@@ -1277,7 +1353,7 @@ const Player: React.FC = () => {
               <div className="flex items-center justify-center gap-4 sm:gap-10 md:gap-14">
                 <button 
                   onClick={() => { if (audioRef.current) audioRef.current.currentTime -= 15; }}
-                  className="text-[#4A3728] dark:text-slate-400 p-1.5 sm:p-2 hover:scale-110 transition-transform"
+                  className="text-slate-600 dark:text-slate-400 p-1.5 sm:p-2 hover:scale-110 transition-transform"
                 >
                   <div className="relative">
                     <RotateCcw size={24} className="sm:w-8 sm:h-8" />
@@ -1286,28 +1362,31 @@ const Player: React.FC = () => {
                 </button>
                 <button 
                   onClick={prevChapter}
-                  className="text-[#0F172A] dark:text-white p-1.5 sm:p-2 hover:scale-110 transition-transform"
+                  className="text-slate-900 dark:text-white p-1.5 sm:p-2 hover:scale-110 transition-transform"
                 >
                   <SkipBack size={28} className="sm:w-9 sm:h-9" fill="currentColor" />
                 </button>
                 
-                <button 
+                <button
                   onClick={togglePlay}
-                  className="w-16 h-16 sm:w-24 sm:h-24 rounded-full bg-[#2D1B10] dark:bg-primary-600 text-white flex items-center justify-center shadow-2xl transform hover:scale-105 active:scale-95 transition-all"
-                  style={themeColor ? { backgroundColor: toSolidColor(themeColor) } : {}}
+                  className={`w-16 h-16 sm:w-24 sm:h-24 rounded-full text-white flex items-center justify-center shadow-2xl transform hover:scale-105 active:scale-95 transition-all ${!effectiveThemeColor ? 'bg-primary-600' : ''}`}
+                  style={effectiveThemeColor ? { 
+                    backgroundColor: toSolidColor(effectiveThemeColor),
+                    color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
+                  } : {}}
                 >
                   {isPlaying ? <Pause size={32} className="sm:w-12 sm:h-12" fill="currentColor" /> : <Play size={32} className="sm:w-12 sm:h-12 ml-1 sm:ml-2" fill="currentColor" />}
                 </button>
 
                 <button 
                   onClick={nextChapter}
-                  className="text-[#0F172A] dark:text-white p-1.5 sm:p-2 hover:scale-110 transition-transform"
+                  className="text-slate-900 dark:text-white p-1.5 sm:p-2 hover:scale-110 transition-transform"
                 >
                   <SkipForward size={28} className="sm:w-9 sm:h-9" fill="currentColor" />
                 </button>
                 <button 
                   onClick={() => { if (audioRef.current) audioRef.current.currentTime += 15; }}
-                  className="text-[#4A3728] dark:text-slate-400 p-1.5 sm:p-2 hover:scale-110 transition-transform"
+                  className="text-slate-600 dark:text-slate-400 p-1.5 sm:p-2 hover:scale-110 transition-transform"
                 >
                   <div className="relative">
                     <RotateCw size={24} className="sm:w-8 sm:h-8" />
@@ -1317,7 +1396,7 @@ const Player: React.FC = () => {
               </div>
 
               {/* Bottom Row Controls */}
-              <div className="flex justify-between items-center max-w-2xl mx-auto w-full px-2 sm:px-4 text-[#4A3728] dark:text-slate-400">
+              <div className="flex justify-between items-center max-w-2xl mx-auto w-full px-2 sm:px-4 text-slate-600 dark:text-slate-400">
                 <button 
                   onClick={() => setPlaybackSpeed(playbackSpeed >= 2 ? 0.5 : playbackSpeed + 0.25)}
                   className="flex flex-col items-center gap-1 sm:gap-1.5 transition-all active:scale-95 group relative"
@@ -1367,7 +1446,10 @@ const Player: React.FC = () => {
                           <button
                             key={mins}
                             onClick={() => {
-                              setSleepTimer(mins * 60);
+                              const duration = mins * 60;
+                              const endTime = Date.now() + duration * 1000;
+                              sleepTimerEndTimeRef.current = endTime;
+                              setSleepTimer(duration);
                               setShowSleepTimer(false);
                             }}
                             className="px-3 py-2 text-xs sm:text-sm rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-600"
@@ -1395,7 +1477,10 @@ const Player: React.FC = () => {
                           onClick={() => {
                             const mins = parseInt(customMinutes);
                             if (mins > 0) {
-                              setSleepTimer(mins * 60);
+                              const duration = mins * 60;
+                              const endTime = Date.now() + duration * 1000;
+                              sleepTimerEndTimeRef.current = endTime;
+                              setSleepTimer(duration);
                               setShowSleepTimer(false);
                               setCustomMinutes('');
                             }
@@ -1409,6 +1494,11 @@ const Player: React.FC = () => {
                       <button
                         onClick={() => {
                           setSleepTimer(null);
+                          sleepTimerEndTimeRef.current = null;
+                          if (sleepTimerIntervalRef.current) {
+                            clearInterval(sleepTimerIntervalRef.current);
+                            sleepTimerIntervalRef.current = null;
+                          }
                           setShowSleepTimer(false);
                         }}
                         className="mt-2 px-4 py-2 text-xs sm:text-sm font-bold rounded-xl bg-red-50 dark:bg-red-900/20 text-red-500 transition-colors"
@@ -1429,7 +1519,7 @@ const Player: React.FC = () => {
               <div className="relative w-full max-w-sm bg-white dark:bg-slate-900 rounded-[32px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
                 <div className="p-6 sm:p-8">
                   <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-bold dark:text-white text-[#4A3728]">播放设置</h3>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white">播放设置</h3>
                     <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
                       <X size={20} className="text-slate-400" />
                     </button>
@@ -1551,12 +1641,13 @@ const Player: React.FC = () => {
                           onClick={() => setCurrentGroupIndex(index)}
                           className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border shrink-0 snap-start ${
                             currentGroupIndex === index
-                              ? 'text-white shadow-lg shadow-primary-500/30'
+                              ? `text-white shadow-lg shadow-primary-500/30 ${!effectiveThemeColor ? 'bg-primary-600 border-primary-600' : ''}`
                               : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
                           }`}
                           style={currentGroupIndex === index ? { 
-                            backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0'),
-                            borderColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0')
+                            backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined,
+                            borderColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined,
+                            color: (effectiveThemeColor && isLight(effectiveThemeColor)) ? '#475569' : (effectiveThemeColor ? '#ffffff' : undefined)
                           } : {}}
                         >
                           第 {group.start}-{group.end} 章
@@ -1581,35 +1672,36 @@ const Player: React.FC = () => {
                       <div 
                         key={chapter.id}
                         id={`player-chapter-${chapter.id}`}
-                        className={`group flex items-center justify-between p-4 rounded-2xl transition-all border ${
+                        onClick={() => {
+                          playChapter(currentBook!, currentChapters, chapter);
+                          setShowChapters(false);
+                        }}
+                        className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
                           isCurrent 
                             ? 'bg-opacity-10 border-opacity-20' 
                             : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary-200 dark:hover:border-primary-800'
                         }`}
                         style={isCurrent ? { 
-                          backgroundColor: themeColor.replace('0.15', '0.1').replace('0.1', '0.1'),
-                          borderColor: themeColor.replace('0.15', '0.3').replace('0.1', '0.3'),
+                          backgroundColor: effectiveThemeColor ? setAlpha(effectiveThemeColor, 0.1) : undefined,
+                          borderColor: effectiveThemeColor ? setAlpha(effectiveThemeColor, 0.3) : undefined,
                         } : {}}
                       >
-                        <div 
-                          className="flex items-center gap-4 min-w-0 flex-1 cursor-pointer"
-                          onClick={() => {
-                            playChapter(currentBook!, currentChapters, chapter);
-                            setShowChapters(false);
-                          }}
-                        >
-                          <div 
-                            className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
-                              isCurrent ? 'text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
-                            }`}
-                            style={isCurrent ? { backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') } : {}}
-                          >
+                        <div className="flex items-center gap-4 min-w-0">
+                            <div 
+                              className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
+                                isCurrent ? `text-white ${!effectiveThemeColor ? 'bg-primary-600' : ''}` : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                              }`}
+                              style={isCurrent ? { 
+                                backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined,
+                                color: (effectiveThemeColor && isLight(effectiveThemeColor)) ? '#475569' : (effectiveThemeColor ? '#ffffff' : undefined)
+                              } : {}}
+                            >
                             {chapter.chapterIndex || (actualIndex + 1)}
                           </div>
                           <div className="min-w-0">
                             <p 
                               className={`text-sm sm:text-base font-bold truncate ${isCurrent ? '' : 'text-slate-900 dark:text-white'}`}
-                              style={isCurrent ? { color: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') } : {}}
+                              style={isCurrent ? { color: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined } : {}}
                             >
                               {chapter.title}
                             </p>
@@ -1636,9 +1728,9 @@ const Player: React.FC = () => {
                         <div className="flex items-center gap-4 pl-4 border-l border-slate-100 dark:border-slate-800 ml-4">
                           {isCurrent && isPlaying && (
                             <div className="flex gap-1 items-end h-5">
-                              <div className="w-1 animate-music-bar-1 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
-                              <div className="w-1 animate-music-bar-2 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
-                              <div className="w-1 animate-music-bar-3 rounded-full" style={{ backgroundColor: themeColor.replace('0.15', '1.0').replace('0.1', '1.0') }}></div>
+                              <div className={`w-1 animate-music-bar-1 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
+                              <div className={`w-1 animate-music-bar-2 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
+                              <div className={`w-1 animate-music-bar-3 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
                             </div>
                           )}
                         </div>

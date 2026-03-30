@@ -11,7 +11,7 @@ import SearchPage from './pages/SearchPage';
 import FavoritesPage from './pages/FavoritesPage';
 import AdminLibraries from './pages/AdminLibraries';
 import AdminUsers from './pages/AdminUsers';
-import TaskLogsPage from './pages/TaskLogsPage';
+import LogsPage from './pages/LogsPage';
 import SettingsPage from './pages/SettingsPage';
 import WidgetPage from './pages/WidgetPage';
 import PluginsPage from './pages/PluginsPage';
@@ -62,9 +62,9 @@ function App() {
                     <AdminUsers />
                   </AdminRoute>
                 } />
-                <Route path="admin/tasks" element={
+                <Route path="admin/logs" element={
                   <AdminRoute>
-                    <TaskLogsPage />
+                    <LogsPage />
                   </AdminRoute>
                 } />
                 <Route path="admin/plugins" element={
