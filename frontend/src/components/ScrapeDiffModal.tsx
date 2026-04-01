@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../api/client';
 import type { ScrapeDiff, ChapterChange } from '../types';
 import { X, Save, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
+import { getCoverUrl } from '../utils/image';
 
 interface Props {
   bookId: string;
@@ -66,7 +67,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       });
       setSelectedChanges(initialSelected);
     } catch (err) {
-      console.error('Failed to fetch scrape diff', err);
+      console.error('获取刮削差异失败', err);
       // alert('获取元数据失败');
     } finally {
       setLoading(false);
@@ -111,7 +112,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
   /*
   useEffect(() => {
     // Reset image errors when diff changes
-    // setImageError({});
+    setImageError({});
   }, [diff]);
   */
 
@@ -129,6 +130,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
         cover_url: cleanUrl(diff.scraped.cover_url) || null,
         intro: diff.scraped.description,
         tags: diff.scraped.tags || [],
+        genre: diff.scraped.genre || null,
         chapter_count: 0, // Not used for update
         duration: 0
       };
@@ -141,7 +143,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       onSave();
       onClose();
     } catch (err) {
-      console.error('Failed to apply scrape result', err);
+      console.error('应用刮削结果失败', err);
       alert('应用失败');
     } finally {
       setSaving(false);
@@ -212,7 +214,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                 <div className="w-32 h-48 rounded-xl overflow-hidden shadow-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 relative group">
                   {diff.scraped.cover_url ? (
                       <img 
-                        src={diff.scraped.cover_url} 
+                        src={getCoverUrl(diff.scraped.cover_url)} 
                         className="w-full h-full object-cover" 
                         alt="Cover"
                         referrerPolicy="no-referrer"
