@@ -1,32 +1,31 @@
 import { useEffect, useState } from 'react';
 import apiClient from '../api/client';
+import { safeStorage } from '../utils/storage';
 
 export type Theme = 'light' | 'dark' | 'system';
 
 export const useTheme = () => {
   const [theme, setTheme] = useState<Theme>(() => {
-    return (localStorage.getItem('theme') as Theme) || 'system';
+    return (safeStorage.getItem('theme') as Theme) || 'system';
   });
 
-  const applyTheme = (t: Theme) => {
-    setTheme(t);
-  };
-
   useEffect(() => {
-    const root = window.document.documentElement;
     const applyToDom = (t: Theme) => {
-      root.classList.remove('light', 'dark');
-
+      const root = window.document.documentElement;
+      const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  
       let effectiveTheme = t;
       if (t === 'system') {
-        effectiveTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        effectiveTheme = systemPrefersDark ? 'dark' : 'light';
+        safeStorage.removeItem('theme');
       }
-
+  
+      root.classList.remove('light', 'dark');
       root.classList.add(effectiveTheme);
     };
 
     applyToDom(theme);
-    localStorage.setItem('theme', theme);
+    safeStorage.setItem('theme', theme);
 
     // Listen for system theme changes if set to system
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -35,17 +34,19 @@ export const useTheme = () => {
         applyToDom('system');
       }
     };
-
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [theme]);
 
-  const refreshTheme = async () => {
-    // Skip if offline or no token
-    const token = localStorage.getItem('auth_token');
-    if (!token || !navigator.onLine) return;
+  const applyTheme = (t: Theme) => {
+    setTheme(t);
+  };
 
+  const refreshTheme = async () => {
     try {
+      const token = safeStorage.getItem('auth_token');
+      if (!token || !navigator.onLine) return;
+
       const response = await apiClient.get('/api/settings');
       if (response.data.theme) {
         applyTheme(response.data.theme);

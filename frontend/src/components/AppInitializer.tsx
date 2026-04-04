@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { Loader2 } from 'lucide-react';
 import logoImg from '../assets/logo.png';
+import { safeStorage } from '../utils/storage';
 
 type WindowWithElectron = {
   electronAPI?: unknown;
@@ -36,9 +37,9 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
       }
 
       // Check if we have saved credentials
-      const savedUsername = localStorage.getItem('saved_username');
-      const savedPassword = localStorage.getItem('saved_password');
-      const serverUrl = localStorage.getItem('server_url');
+      const savedUsername = safeStorage.getItem('saved_username');
+      const savedPassword = safeStorage.getItem('saved_password');
+      const serverUrl = safeStorage.getItem('server_url');
 
       // If we are already on the login page, skip auto-login
       if (location.pathname === '/login') {

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { Lock, User, Server } from 'lucide-react';
 import logoImg from '../assets/logo.png';
+import { safeStorage } from '../utils/storage';
 
 type ErrorWithResponse = {
   response?: {
@@ -28,8 +29,8 @@ const LoginPage: React.FC = () => {
 
   useEffect(() => {
     // Restore saved credentials if available
-    const savedUsername = localStorage.getItem('saved_username');
-    const savedPassword = localStorage.getItem('saved_password');
+    const savedUsername = safeStorage.getItem('saved_username');
+    const savedPassword = safeStorage.getItem('saved_password');
     if (savedUsername) setUsername(savedUsername);
     if (savedPassword) setPassword(savedPassword);
     
@@ -140,11 +141,11 @@ const LoginPage: React.FC = () => {
       
       // Save credentials if "Remember Password" is checked
       if (rememberPassword) {
-        localStorage.setItem('saved_username', username);
-        localStorage.setItem('saved_password', password);
+        safeStorage.setItem('saved_username', username);
+        safeStorage.setItem('saved_password', password);
       } else {
-        localStorage.removeItem('saved_username');
-        localStorage.removeItem('saved_password');
+        safeStorage.removeItem('saved_username');
+        safeStorage.removeItem('saved_password');
       }
 
       setAuth(user, token);

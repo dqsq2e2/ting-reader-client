@@ -1,12 +1,13 @@
 import { useAuthStore } from '../store/authStore';
+import { safeStorage } from './storage';
 
 export const getCoverUrl = (url?: string, libraryId?: string, bookId?: string) => {
   // Prioritize the store's activeUrl, which is dynamically updated and authoritative
   let baseUrl = useAuthStore.getState().activeUrl;
 
-  // Fallback to localStorage directly if store is empty (e.g. early init)
+  // Fallback to safeStorage directly if store is empty (e.g. early init)
   if (!baseUrl) {
-    baseUrl = localStorage.getItem('active_url') || localStorage.getItem('server_url') || '';
+    baseUrl = safeStorage.getItem('active_url') || safeStorage.getItem('server_url') || '';
   }
 
   // Final fallback for Web Dev environment
@@ -19,7 +20,7 @@ export const getCoverUrl = (url?: string, libraryId?: string, bookId?: string) =
     baseUrl = baseUrl.slice(0, -1);
   }
 
-  const token = useAuthStore.getState().token || localStorage.getItem('auth_token');
+  const token = useAuthStore.getState().token || safeStorage.getItem('auth_token');
   
   if (!url) return '/placeholder-cover.png';
   
