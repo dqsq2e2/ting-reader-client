@@ -7,10 +7,13 @@ import SeriesCard from '../components/SeriesCard';
 import SeriesModal from '../components/SeriesModal';
 import { Search, Filter, Database, Plus, Library as LibraryIcon, Layers, Check, X, CheckSquare } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
+import { useAuthStore } from '../store/authStore';
 import { getPinyinInitial } from '../utils/pinyin';
 
 const BookshelfPage: React.FC = () => {
   const currentChapter = usePlayerStore((state) => state.currentChapter);
+  const user = useAuthStore((state) => state.user);
+  const isAdmin = user?.role === 'admin';
   const [books, setBooks] = useState<Book[]>([]);
   const [series, setSeries] = useState<Series[]>([]);
   const [libraries, setLibraries] = useState<Library[]>([]);
@@ -345,14 +348,16 @@ const BookshelfPage: React.FC = () => {
                   <CheckSquare size={18} />
                   <span>全选</span>
                 </button>
-                <button
-                  onClick={() => setIsSeriesModalOpen(true)}
-                  disabled={selectedBookIds.length === 0}
-                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 disabled:opacity-50 whitespace-nowrap shrink-0"
-                >
-                  <Layers size={18} />
-                  <span>创建系列</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => setIsSeriesModalOpen(true)}
+                    disabled={selectedBookIds.length === 0}
+                    className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 disabled:opacity-50 whitespace-nowrap shrink-0"
+                  >
+                    <Layers size={18} />
+                    <span>创建系列</span>
+                  </button>
+                )}
                 <button
                   onClick={() => { setIsSelectionMode(false); setSelectedBookIds([]); }}
                   className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl shrink-0"
@@ -361,13 +366,15 @@ const BookshelfPage: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setIsSelectionMode(true)}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium shrink-0 order-1"
-              >
-                <Layers size={18} />
-                <span>选择模式</span>
-              </button>
+              isAdmin && (
+                <button
+                  onClick={() => setIsSelectionMode(true)}
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium shrink-0 order-1"
+                >
+                  <Layers size={18} />
+                  <span>选择模式</span>
+                </button>
+              )
             )}
 
             {/* Library Selector */}

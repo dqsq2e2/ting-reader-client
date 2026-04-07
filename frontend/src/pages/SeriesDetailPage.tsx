@@ -7,10 +7,13 @@ import BookSelector from '../components/BookSelector';
 import { ArrowLeft, Trash2, Save, Settings, X, Plus, Filter } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { usePlayerStore } from '../store/playerStore';
+import { useAuthStore } from '../store/authStore';
 
 const SeriesDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const isAdmin = user?.role === 'admin';
   const [series, setSeries] = useState<Series | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
@@ -178,12 +181,14 @@ const SeriesDetailPage: React.FC = () => {
                   <Filter size={20} />
                 </button>
 
-                <button 
-                  onClick={() => setIsEditing(true)}
-                  className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <Settings size={20} />
-                </button>
+                {isAdmin && (
+                  <button 
+                    onClick={() => setIsEditing(true)}
+                    className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    <Settings size={20} />
+                  </button>
+                )}
 
                 {showFilterMenu && (
                     <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl z-50 py-2 animate-in zoom-in-95 duration-200">

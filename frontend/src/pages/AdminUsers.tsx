@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
 import type { AxiosError } from 'axios';
-import type { Book, Library, User as UserType } from '../types';
+import type { Book, Library, User as UserType, Series } from '../types';
 import { 
   Plus, 
   Users,
@@ -39,6 +39,7 @@ const AdminUsers: React.FC = () => {
   // Book Search
   const [bookSearchQuery, setBookSearchQuery] = useState('');
   const [bookSearchResults, setBookSearchResults] = useState<Book[]>([]);
+  const [seriesSearchResults, setSeriesSearchResults] = useState<Series[]>([]);
   const [selectedBooks, setSelectedBooks] = useState<Book[]>([]);
   const [isSearchingBooks, setIsSearchingBooks] = useState(false);
 
@@ -70,10 +71,21 @@ const AdminUsers: React.FC = () => {
       const timer = setTimeout(async () => {
         setIsSearchingBooks(true);
         try {
-          const res = await apiClient.get('/api/books', { params: { search: bookSearchQuery } });
-          setBookSearchResults(res.data.slice(0, 10)); // Limit to 10
+          const [booksRes, seriesRes] = await Promise.all([
+            apiClient.get('/api/books', { params: { search: bookSearchQuery } }),
+            apiClient.get('/api/v1/series')
+          ]);
+          
+          setBookSearchResults(booksRes.data.slice(0, 10)); // Limit to 10
+          
+          const filteredSeries = (seriesRes.data as Series[]).filter(s => 
+            s.title.toLowerCase().includes(bookSearchQuery.toLowerCase()) || 
+            (s.author && s.author.toLowerCase().includes(bookSearchQuery.toLowerCase()))
+          );
+          setSeriesSearchResults(filteredSeries.slice(0, 5)); // Limit to 5
+          
         } catch (err) {
-          console.error('Search books failed', err);
+          console.error('Search books/series failed', err);
         } finally {
           setIsSearchingBooks(false);
         }
@@ -81,6 +93,7 @@ const AdminUsers: React.FC = () => {
       return () => clearTimeout(timer);
     } else {
       setBookSearchResults([]);
+      setSeriesSearchResults([]);
     }
   }, [bookSearchQuery]);
 
@@ -417,41 +430,85 @@ const AdminUsers: React.FC = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">特定书籍权限 (搜索添加)</label>
+                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">特定书籍权限 (搜索书名或系列名添加)</label>
                       <div className="relative">
                         <input
                           type="text"
                           value={bookSearchQuery}
                           onChange={(e) => setBookSearchQuery(e.target.value)}
-                          placeholder="输入书名搜索..."
+                          placeholder="输入书名或系列名搜索..."
                           className="w-full pl-4 pr-10 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white text-sm"
                         />
                         {isSearchingBooks && (
                           <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-slate-300 border-t-primary-500 rounded-full animate-spin"></div>
                         )}
-                        {bookSearchResults.length > 0 && (
-                          <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl shadow-xl max-h-48 overflow-y-auto">
-                            {bookSearchResults.map(book => (
-                              <button
-                                key={book.id}
-                                type="button"
-                                onClick={() => {
-                                  if (!selectedBooks.find(b => b.id === book.id)) {
-                                    setSelectedBooks([...selectedBooks, book]);
-                                    setFormData(prev => ({
-                                      ...prev,
-                                      booksAccessible: [...(prev.booksAccessible || []), book.id]
-                                    }));
-                                  }
-                                  setBookSearchQuery('');
-                                  setBookSearchResults([]);
-                                }}
-                                className="w-full text-left px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm dark:text-white flex items-center justify-between group"
-                              >
-                                <span className="truncate">{book.title}</span>
-                                <Plus size={14} className="opacity-0 group-hover:opacity-100 text-primary-600" />
-                              </button>
-                            ))}
+                        {(bookSearchResults.length > 0 || seriesSearchResults.length > 0) && (
+                          <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl shadow-xl max-h-64 overflow-y-auto">
+                            {seriesSearchResults.length > 0 && (
+                              <div className="py-1">
+                                <div className="px-4 py-1 text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-50 dark:bg-slate-800/50">
+                                  系列
+                                </div>
+                                {seriesSearchResults.map(series => (
+                                  <button
+                                    key={series.id}
+                                    type="button"
+                                    onClick={() => {
+                                      const seriesBooks = series.books || [];
+                                      const newBooks = seriesBooks.filter(sb => !selectedBooks.find(b => b.id === sb.id));
+                                      
+                                      if (newBooks.length > 0) {
+                                        setSelectedBooks([...selectedBooks, ...newBooks]);
+                                        setFormData(prev => ({
+                                          ...prev,
+                                          booksAccessible: [...(prev.booksAccessible || []), ...newBooks.map(b => b.id)]
+                                        }));
+                                      }
+                                      setBookSearchQuery('');
+                                      setBookSearchResults([]);
+                                      setSeriesSearchResults([]);
+                                    }}
+                                    className="w-full text-left px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm dark:text-white flex items-center justify-between group"
+                                  >
+                                    <div className="flex flex-col truncate">
+                                      <span className="truncate font-medium">{series.title}</span>
+                                      <span className="text-xs text-slate-500 truncate">共 {series.books?.length || 0} 本书</span>
+                                    </div>
+                                    <Plus size={14} className="opacity-0 group-hover:opacity-100 text-primary-600 flex-shrink-0 ml-2" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {bookSearchResults.length > 0 && (
+                              <div className="py-1">
+                                <div className="px-4 py-1 text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-50 dark:bg-slate-800/50">
+                                  书籍
+                                </div>
+                                {bookSearchResults.map(book => (
+                                  <button
+                                    key={book.id}
+                                    type="button"
+                                    onClick={() => {
+                                      if (!selectedBooks.find(b => b.id === book.id)) {
+                                        setSelectedBooks([...selectedBooks, book]);
+                                        setFormData(prev => ({
+                                          ...prev,
+                                          booksAccessible: [...(prev.booksAccessible || []), book.id]
+                                        }));
+                                      }
+                                      setBookSearchQuery('');
+                                      setBookSearchResults([]);
+                                      setSeriesSearchResults([]);
+                                    }}
+                                    className="w-full text-left px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm dark:text-white flex items-center justify-between group"
+                                  >
+                                    <span className="truncate">{book.title}</span>
+                                    <Plus size={14} className="opacity-0 group-hover:opacity-100 text-primary-600 flex-shrink-0 ml-2" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
