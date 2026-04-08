@@ -657,7 +657,8 @@ const Player: React.FC = () => {
         const diff = Math.abs(browserDuration - (currentChapter.duration || 0));
         if (diff > 2 && navigator.onLine && !window.location.hash.includes('/offline')) {
           console.log(`Syncing accurate duration for ${currentChapter.title}: ${browserDuration}s`);
-          apiClient.patch(`/api/chapters/${currentChapter.id}`, { duration: browserDuration })
+          // Convert to integer (round to nearest second)
+          apiClient.patch(`/api/chapters/${currentChapter.id}`, { duration: Math.round(browserDuration) })
             .catch(err => console.error('Failed to sync duration', err));
         }
       }
