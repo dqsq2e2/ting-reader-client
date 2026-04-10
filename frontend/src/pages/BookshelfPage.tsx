@@ -205,11 +205,11 @@ const BookshelfPage: React.FC = () => {
   const getGridCols = () => {
     switch (iconSize) {
       case 'small':
-        return 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-x-4 gap-y-8';
+        return 'grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9 gap-x-3 gap-y-7';
       case 'large':
-        return 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-8 gap-y-12';
+        return 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-12';
       default: // medium
-        return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-6 gap-y-10';
+        return 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-x-5 gap-y-9';
     }
   };
 
@@ -509,7 +509,7 @@ const BookshelfPage: React.FC = () => {
               )}
               
               <div 
-                className="fixed right-1 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center bg-transparent py-2 select-none touch-none"
+                className="fixed right-2 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center bg-transparent py-2 select-none touch-none"
                 onTouchStart={(e) => {
                   e.preventDefault();
                   setIsTouchingIndex(true);

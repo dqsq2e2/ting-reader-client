@@ -11,12 +11,17 @@ export default {
         'music-bar': {
           '0%, 100%': { height: '4px' },
           '50%': { height: '16px' },
-        }
+        },
+        'scroll-text': {
+          '0%': { transform: 'translateX(0%)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
       },
       animation: {
         'music-bar-1': 'music-bar 0.8s ease-in-out infinite',
         'music-bar-2': 'music-bar 1.0s ease-in-out infinite 0.2s',
         'music-bar-3': 'music-bar 0.6s ease-in-out infinite 0.4s',
+        'scroll-text': 'scroll-text 10s linear infinite',
       },
       colors: {
         primary: {

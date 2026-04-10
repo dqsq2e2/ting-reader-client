@@ -29,6 +29,9 @@ const SearchPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const currentChapter = usePlayerStore((state) => state.currentChapter);
+  
+  // Cover shape setting from bookshelf
+  const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
 
   // Scroll refs for filter rows
   const filterRowRefs = {
@@ -56,6 +59,23 @@ const SearchPage: React.FC = () => {
     }, 500);
     return () => clearTimeout(timer);
   }, [query]);
+
+  // Load bookshelf settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const res = await apiClient.get('/api/settings');
+        const settings = res.data.settingsJson || {};
+        
+        if (settings.bookshelfCoverShape) {
+          setCoverShape(settings.bookshelfCoverShape);
+        }
+      } catch (err) {
+        console.error('Failed to load settings', err);
+      }
+    };
+    loadSettings();
+  }, []);
 
   // Fetch all metadata options on mount
   useEffect(() => {
@@ -357,7 +377,7 @@ const SearchPage: React.FC = () => {
       {results.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 pt-4">
           {results.map((book) => (
-            <BookCard key={book.id} book={book} />
+            <BookCard key={book.id} book={book} coverShape={coverShape} />
           ))}
         </div>
       ) : (debouncedQuery || hasActiveFilters) && !loading ? (

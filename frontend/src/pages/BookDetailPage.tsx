@@ -60,6 +60,8 @@ const BookDetailPage: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasInitialScrolled = useRef(false);
   const [highlightedChapterId, setHighlightedChapterId] = useState<string | null>(null);
+  const playButtonContainerRef = useRef<HTMLDivElement>(null);
+  const [isPlayButtonTextOverflowing, setIsPlayButtonTextOverflowing] = useState(false);
 
   // User Settings
   const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
@@ -142,7 +144,6 @@ const BookDetailPage: React.FC = () => {
     return g;
   }, [currentChapters]);
 
-  const playBook = usePlayerStore((state) => state.playBook);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const playChapter = usePlayerStore((state) => state.playChapter);
 
@@ -281,8 +282,12 @@ const BookDetailPage: React.FC = () => {
       
       scrollToChapterElement(targetChapter.id, targetList);
     } else {
-      // Default play behavior
-      playBook(book!, currentChapters);
+      // No play history - play first main chapter
+      if (mainChapters.length > 0) {
+        playChapter(book!, chapters, mainChapters[0]);
+      } else if (chapters.length > 0) {
+        playChapter(book!, chapters, chapters[0]);
+      }
     }
   };
 
@@ -321,6 +326,71 @@ const BookDetailPage: React.FC = () => {
       clearTimeout(timer);
     };
   }, [book?.tags]);
+
+  // Check if play button text is overflowing
+  useEffect(() => {
+    const checkPlayButtonOverflow = () => {
+      if (!playButtonContainerRef.current) return;
+      
+      const button = playButtonContainerRef.current;
+      const computedStyle = window.getComputedStyle(button);
+      
+      // Get button dimensions
+      const buttonWidth = button.offsetWidth;
+      
+      // Parse padding from computed style
+      const paddingLeft = parseFloat(computedStyle.paddingLeft);
+      const paddingRight = parseFloat(computedStyle.paddingRight);
+      
+      // Icon width (18px) + gap (8px from gap-2 class)
+      const iconAndGapWidth = 18 + 8;
+      
+      // Calculate available width for text
+      const availableWidth = buttonWidth - paddingLeft - paddingRight - iconAndGapWidth;
+      
+      // Create temporary element to measure text width
+      const tempSpan = document.createElement('span');
+      tempSpan.style.visibility = 'hidden';
+      tempSpan.style.position = 'absolute';
+      tempSpan.style.whiteSpace = 'nowrap';
+      tempSpan.style.fontWeight = computedStyle.fontWeight;
+      tempSpan.style.fontSize = computedStyle.fontSize;
+      tempSpan.style.fontFamily = computedStyle.fontFamily;
+      
+      const text = resumeChapter && currentChapter?.bookId === book.id 
+        ? `正在播放：${resumeChapter.title}` 
+        : resumeChapter 
+        ? `继续播放：${resumeChapter.title}` 
+        : '立即播放';
+      
+      tempSpan.textContent = text;
+      document.body.appendChild(tempSpan);
+      const textWidth = tempSpan.offsetWidth;
+      document.body.removeChild(tempSpan);
+      
+      // Set overflow state with a small buffer (2px) to prevent edge cases
+      setIsPlayButtonTextOverflowing(textWidth > availableWidth - 2);
+    };
+
+    // Check immediately and after a delay to ensure layout is stable
+    checkPlayButtonOverflow();
+    const timer = setTimeout(checkPlayButtonOverflow, 100);
+    
+    // Check on resize with debounce
+    let resizeTimer: NodeJS.Timeout;
+    const handleResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(checkPlayButtonOverflow, 50);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timer);
+      clearTimeout(resizeTimer);
+    };
+  }, [resumeChapter, currentChapter, book?.id]);
 
   const toggleFavorite = async () => {
     try {
@@ -552,6 +622,7 @@ const BookDetailPage: React.FC = () => {
 
             <div className="w-full flex flex-col gap-3 md:max-w-md mx-auto md:mx-0">
               <button 
+                ref={playButtonContainerRef}
                 onClick={handlePlayClick}
                 className="w-full flex items-center justify-center gap-2 px-5 sm:px-8 py-3.5 sm:py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group"
                 style={effectiveThemeColor ? { 
@@ -560,8 +631,31 @@ const BookDetailPage: React.FC = () => {
                   color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
                 } : {}}
               >
-                <Play size={18} fill="currentColor" />
-                {resumeChapter ? '继续播放' : '立即播放'}
+                <Play size={18} fill="currentColor" className="shrink-0" />
+                {isPlayButtonTextOverflowing ? (
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <div className="whitespace-nowrap inline-block animate-scroll-text">
+                      {resumeChapter && currentChapter?.bookId === book.id 
+                        ? `正在播放：${resumeChapter.title}    ` 
+                        : resumeChapter 
+                        ? `继续播放：${resumeChapter.title}    ` 
+                        : '立即播放'}
+                      {(resumeChapter && currentChapter?.bookId === book.id 
+                        ? `正在播放：${resumeChapter.title}    ` 
+                        : resumeChapter 
+                        ? `继续播放：${resumeChapter.title}    ` 
+                        : '')}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="truncate">
+                    {resumeChapter && currentChapter?.bookId === book.id 
+                      ? `正在播放：${resumeChapter.title}` 
+                      : resumeChapter 
+                      ? `继续播放：${resumeChapter.title}` 
+                      : '立即播放'}
+                  </span>
+                )}
               </button>
 
               <div className="w-full flex gap-2 sm:gap-3">
