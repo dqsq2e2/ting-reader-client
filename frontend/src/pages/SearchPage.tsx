@@ -15,6 +15,7 @@ const SearchPage: React.FC = () => {
   const [selectedGenre, setSelectedGenre] = useState<string>('');
   const [selectedAuthor, setSelectedAuthor] = useState<string>('');
   const [selectedNarrator, setSelectedNarrator] = useState<string>('');
+  const [selectedYear, setSelectedYear] = useState<string>('');
   const [showFilters, setShowFilters] = useState(false);
   
   // Data options
@@ -24,14 +25,16 @@ const SearchPage: React.FC = () => {
   const [allGenres, setAllGenres] = useState<string[]>([]);
   const [allAuthors, setAllAuthors] = useState<string[]>([]);
   const [allNarrators, setAllNarrators] = useState<string[]>([]);
+  const [allYears, setAllYears] = useState<string[]>([]);
   
   const [results, setResults] = useState<Book[]>([]);
   const [loading, setLoading] = useState(false);
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   
-  // Cover shape setting from bookshelf
+  // Cover shape and icon size settings from bookshelf
   const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
+  const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
 
   // Scroll refs for filter rows
   const filterRowRefs = {
@@ -70,12 +73,26 @@ const SearchPage: React.FC = () => {
         if (settings.bookshelfCoverShape) {
           setCoverShape(settings.bookshelfCoverShape);
         }
+        if (settings.bookshelfIconSize) {
+          setIconSize(settings.bookshelfIconSize);
+        }
       } catch (err) {
         console.error('Failed to load settings', err);
       }
     };
     loadSettings();
   }, []);
+
+  const getGridCols = () => {
+    switch (iconSize) {
+      case 'small':
+        return 'grid-cols-4 sm:grid-cols-6 md:grid-cols-7 lg:grid-cols-8 xl:grid-cols-8 2xl:grid-cols-10 gap-x-3 gap-y-7';
+      case 'large':
+        return 'grid-cols-2 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-6 gap-x-6 gap-y-10';
+      default: // medium
+        return 'grid-cols-3 sm:grid-cols-5 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6 2xl:grid-cols-7 gap-x-5 gap-y-9';
+    }
+  };
 
   // Fetch all metadata options on mount
   useEffect(() => {
@@ -97,6 +114,7 @@ const SearchPage: React.FC = () => {
         const authors = new Set<string>();
         const narrators = new Set<string>();
         const genres = new Set<string>();
+        const years = new Set<number>();
         
         books.forEach(book => {
           if (book.author) authors.add(book.author);
@@ -107,11 +125,13 @@ const SearchPage: React.FC = () => {
               if (trimmed) genres.add(trimmed);
             });
           }
+          if (book.year) years.add(book.year);
         });
         
         setAllAuthors(Array.from(authors).sort());
         setAllNarrators(Array.from(narrators).sort());
         setAllGenres(Array.from(genres).sort());
+        setAllYears(Array.from(years).sort((a, b) => b - a).map(String)); // Descending order
         
       } catch (err) {
         console.error('Failed to fetch metadata', err);
@@ -123,7 +143,7 @@ const SearchPage: React.FC = () => {
   useEffect(() => {
     const searchBooks = async () => {
       // If no filters are active, clear results
-      if (!debouncedQuery.trim() && !selectedTag && !selectedGenre && !selectedAuthor && !selectedNarrator && !selectedLibraryId && !selectedSeries) {
+      if (!debouncedQuery.trim() && !selectedTag && !selectedGenre && !selectedAuthor && !selectedNarrator && !selectedLibraryId && !selectedSeries && !selectedYear) {
         setResults([]);
         return;
       }
@@ -152,6 +172,10 @@ const SearchPage: React.FC = () => {
           filtered = filtered.filter(b => b.genre && b.genre.split(',').map(g => g.trim()).includes(selectedGenre));
         }
 
+        if (selectedYear) {
+          filtered = filtered.filter(b => b.year && String(b.year) === selectedYear);
+        }
+
         if (selectedSeries) {
            const series = allSeries.find(s => s.id === selectedSeries);
            if (series?.books) {
@@ -171,7 +195,7 @@ const SearchPage: React.FC = () => {
     };
 
     searchBooks();
-  }, [debouncedQuery, selectedTag, selectedGenre, selectedAuthor, selectedNarrator, selectedLibraryId, selectedSeries, allSeries]);
+  }, [debouncedQuery, selectedTag, selectedGenre, selectedAuthor, selectedNarrator, selectedLibraryId, selectedSeries, selectedYear, allSeries]);
 
   // Filter Row Component
   const FilterRow = ({ 
@@ -271,7 +295,7 @@ const SearchPage: React.FC = () => {
     );
   };
 
-  const hasActiveFilters = selectedLibraryId || selectedTag || selectedGenre || selectedAuthor || selectedNarrator || selectedSeries;
+  const hasActiveFilters = selectedLibraryId || selectedTag || selectedGenre || selectedAuthor || selectedNarrator || selectedSeries || selectedYear;
 
   return (
     <div className="w-full max-w-screen-2xl mx-auto p-4 sm:p-6 md:p-8 lg:p-10 space-y-6">
@@ -356,6 +380,13 @@ const SearchPage: React.FC = () => {
                 scrollRef={filterRowRefs.genres}
               />
               <FilterRow 
+                label="年份" 
+                items={allYears} 
+                selected={selectedYear} 
+                onSelect={setSelectedYear} 
+                scrollRef={filterRowRefs.genres}
+              />
+              <FilterRow 
                 label="作者" 
                 items={allAuthors} 
                 selected={selectedAuthor} 
@@ -375,7 +406,7 @@ const SearchPage: React.FC = () => {
       </div>
 
       {results.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 pt-4">
+        <div className={`grid ${getGridCols()} pt-4`}>
           {results.map((book) => (
             <BookCard key={book.id} book={book} coverShape={coverShape} />
           ))}

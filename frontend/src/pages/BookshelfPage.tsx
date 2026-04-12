@@ -20,7 +20,7 @@ const BookshelfPage: React.FC = () => {
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'createdAt' | 'title' | 'author'>('createdAt');
+  const [sortBy, setSortBy] = useState<'createdAt' | 'title' | 'author' | 'year'>('createdAt');
   const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
   const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -99,7 +99,7 @@ const BookshelfPage: React.FC = () => {
     apiClient.post('/api/settings', { bookshelfLibraryId: newId });
   };
 
-  const handleSortChange = (newSort: 'createdAt' | 'title' | 'author') => {
+  const handleSortChange = (newSort: 'createdAt' | 'title' | 'author' | 'year') => {
     setSortBy(newSort);
     setShowFilterMenu(false);
     apiClient.post('/api/settings', { bookshelfSortBy: newSort });
@@ -164,6 +164,11 @@ const BookshelfPage: React.FC = () => {
   const sortedBooks = [...books].sort((a, b) => {
     if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
     if (sortBy === 'author') return (a.author || '').localeCompare(b.author || '', 'zh-CN');
+    if (sortBy === 'year') {
+      const yearA = a.year || 0;
+      const yearB = b.year || 0;
+      return yearB - yearA; // Descending order (newest first)
+    }
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
@@ -205,15 +210,15 @@ const BookshelfPage: React.FC = () => {
   const getGridCols = () => {
     switch (iconSize) {
       case 'small':
-        return 'grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9 gap-x-3 gap-y-7';
+        return 'grid-cols-4 sm:grid-cols-6 md:grid-cols-7 lg:grid-cols-8 xl:grid-cols-8 2xl:grid-cols-10 gap-x-3 gap-y-7';
       case 'large':
-        return 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-12';
+        return 'grid-cols-2 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-6 gap-x-6 gap-y-10';
       default: // medium
-        return 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-x-5 gap-y-9';
+        return 'grid-cols-3 sm:grid-cols-5 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6 2xl:grid-cols-7 gap-x-5 gap-y-9';
     }
   };
 
-  // Group items by first letter if sorting by title or author
+  // Group items by first letter if sorting by title or author, or by year if sorting by year
   const groupedItems = React.useMemo(() => {
     if (sortBy === 'createdAt') return null;
 
@@ -227,6 +232,9 @@ const BookshelfPage: React.FC = () => {
         key = getPinyinInitial(book.title);
       } else if (sortBy === 'author') {
         key = getPinyinInitial(book.author || '');
+      } else if (sortBy === 'year') {
+        const year = book.year;
+        key = year ? String(year).slice(-2) : otherKey; // Use last 2 digits (e.g., "24" for 2024)
       }
       if (!groups[key]) groups[key] = [];
       groups[key].push(book);
@@ -239,6 +247,10 @@ const BookshelfPage: React.FC = () => {
         key = getPinyinInitial(series.title);
       } else if (sortBy === 'author') {
         key = getPinyinInitial(series.author || '');
+      } else if (sortBy === 'year') {
+        // For series, we could use the year of the first book if available
+        // For now, skip series in year sorting or use a default
+        key = otherKey;
       }
       if (!groups[key]) groups[key] = [];
       groups[key].push(series);
@@ -249,6 +261,11 @@ const BookshelfPage: React.FC = () => {
       groups[key].sort((a, b) => {
         if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
         if (sortBy === 'author') return (a.author || '').localeCompare(b.author || '', 'zh-CN');
+        if (sortBy === 'year') {
+          const yearA = 'year' in a ? (a.year || 0) : 0;
+          const yearB = 'year' in b ? (b.year || 0) : 0;
+          return yearB - yearA; // Descending order within group
+        }
         return 0;
       });
     });
@@ -256,6 +273,10 @@ const BookshelfPage: React.FC = () => {
     const sortedKeys = Object.keys(groups).sort((a, b) => {
         if (a === otherKey) return 1;
         if (b === otherKey) return -1;
+        if (sortBy === 'year') {
+          // For year sorting, sort keys numerically in descending order
+          return Number(b) - Number(a);
+        }
         return a.localeCompare(b);
     });
 
@@ -444,6 +465,13 @@ const BookshelfPage: React.FC = () => {
                   >
                     作者排序
                     {sortBy === 'author' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
+                  </button>
+                  <button 
+                    onClick={() => handleSortChange('year')}
+                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'year' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    年份排序
+                    {sortBy === 'year' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
                   </button>
 
                   <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest border-t border-b border-slate-50 dark:border-slate-800 mt-2 mb-1">

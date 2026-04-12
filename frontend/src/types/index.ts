@@ -54,6 +54,7 @@ export interface Book {
   skipOutro?: number;
   tags?: string;
   chapterRegex?: string;
+  year?: number;
 }
 
 export interface Chapter {

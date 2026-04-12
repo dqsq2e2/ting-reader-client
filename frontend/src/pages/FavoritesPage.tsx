@@ -11,6 +11,7 @@ const FavoritesPage: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
+  const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
 
   useEffect(() => {
     const fetchFavorites = async () => {
@@ -34,12 +35,26 @@ const FavoritesPage: React.FC = () => {
         if (settings.bookshelfCoverShape) {
           setCoverShape(settings.bookshelfCoverShape);
         }
+        if (settings.bookshelfIconSize) {
+          setIconSize(settings.bookshelfIconSize);
+        }
       } catch (err) {
         console.error('Failed to load settings', err);
       }
     };
     loadSettings();
   }, []);
+
+  const getGridCols = () => {
+    switch (iconSize) {
+      case 'small':
+        return 'grid-cols-4 sm:grid-cols-6 md:grid-cols-7 lg:grid-cols-8 xl:grid-cols-8 2xl:grid-cols-10 gap-x-3 gap-y-7';
+      case 'large':
+        return 'grid-cols-2 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-6 gap-x-6 gap-y-10';
+      default: // medium
+        return 'grid-cols-3 sm:grid-cols-5 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6 2xl:grid-cols-7 gap-x-5 gap-y-9';
+    }
+  };
 
   if (loading) {
     return (
@@ -61,7 +76,7 @@ const FavoritesPage: React.FC = () => {
         </div>
 
       {books.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+        <div className={`grid ${getGridCols()}`}>
           {books.map((book) => (
             <BookCard key={book.id} book={book} coverShape={coverShape} />
           ))}

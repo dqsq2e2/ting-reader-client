@@ -1083,6 +1083,17 @@ const BookDetailPage: React.FC = () => {
                       className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">年份</label>
+                    <input 
+                      type="number" 
+                      value={editData.year || ''}
+                      onChange={e => setEditData({...editData, year: e.target.value ? parseInt(e.target.value) : undefined})}
+                      placeholder="2024"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                    />
+                  </div>
                   
                   <div className="space-y-1">
                     <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center">
