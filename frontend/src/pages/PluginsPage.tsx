@@ -1,17 +1,26 @@
 import React, { useEffect, useState, useRef } from 'react';
 import apiClient from '../api/client';
 import type { Plugin, StorePlugin } from '../types';
-import { 
-  Puzzle, 
-  Upload, 
-  RefreshCw, 
-  Trash2, 
-  CheckCircle, 
-  XCircle, 
+import PluginConfigDialog from '../components/PluginConfigDialog';
+import {
+  Puzzle,
+  Upload,
+  RefreshCw,
+  Trash2,
+  CheckCircle,
+  XCircle,
   AlertCircle,
   ShoppingBag,
   Download,
   Search,
+  Cpu,
+  Globe,
+  Shield,
+  FileText,
+  Link2,
+  Package,
+  Tag,
+  Settings,
 } from 'lucide-react';
 
 const PluginName = ({ name, className = "" }: { name: string, className?: string }) => {
@@ -67,6 +76,7 @@ const PluginsPage: React.FC = () => {
   // category: 'all' | 'scraper' | 'format' | 'utility'
   const [category, setCategory] = useState<string>('all');
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set());
+  const [configPlugin, setConfigPlugin] = useState<Plugin | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -463,18 +473,53 @@ const PluginsPage: React.FC = () => {
                   >
                     {plugin.description}
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-1.5">
                     <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
-                      Type: {plugin.pluginType}
+                      <Tag size={10} className="inline mr-1" />{plugin.pluginType}
                     </span>
                     <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
-                      Author: {plugin.author}
+                      <Cpu size={10} className="inline mr-1" />{plugin.runtime || 'unknown'}
                     </span>
+                    {plugin.supportedExtensions && plugin.supportedExtensions.length > 0 && (
+                      <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                        <FileText size={10} className="inline mr-1" />{plugin.supportedExtensions.slice(0, 4).join(', ')}{plugin.supportedExtensions.length > 4 ? ` +${plugin.supportedExtensions.length - 4}` : ''}
+                      </span>
+                    )}
+                    {plugin.dependencies && plugin.dependencies.length > 0 && (
+                      <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                        <Package size={10} className="inline mr-1" />{plugin.dependencies.length} deps
+                      </span>
+                    )}
+                    {plugin.permissions && plugin.permissions.length > 0 && (
+                      <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                        <Shield size={10} className="inline mr-1" />{plugin.permissions.length} perms
+                      </span>
+                    )}
+                    {plugin.license && (
+                      <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                        {plugin.license}
+                      </span>
+                    )}
+                    {plugin.configSchema && (
+                      <button
+                        onClick={() => setConfigPlugin(plugin)}
+                        className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded-md border border-amber-100 dark:border-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors flex items-center gap-1"
+                      >
+                        <Settings size={10} /> 配置
+                      </button>
+                    )}
                   </div>
+                  {plugin.homepage && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                      <a href={plugin.homepage} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-blue-500 transition-colors">
+                        <Globe size={10} /> Homepage
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
-                  <button 
+                  <button
                     onClick={() => handleReload(plugin.id)}
                     className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                     title="Reload"
@@ -555,16 +600,60 @@ const PluginsPage: React.FC = () => {
                     >
                       {plugin.description}
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-3 flex flex-wrap gap-1.5">
                       <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
-                        {plugin.pluginType}
+                        <Tag size={10} className="inline mr-1" />{plugin.pluginType}
                       </span>
+                      {plugin.runtime && (
+                        <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                          <Cpu size={10} className="inline mr-1" />{plugin.runtime}
+                        </span>
+                      )}
+                      {plugin.supportedExtensions && plugin.supportedExtensions.length > 0 && (
+                        <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                          <FileText size={10} className="inline mr-1" />{plugin.supportedExtensions.slice(0, 4).join(', ')}{plugin.supportedExtensions.length > 4 ? ` +${plugin.supportedExtensions.length - 4}` : ''}
+                        </span>
+                      )}
+                      {plugin.dependencies && plugin.dependencies.length > 0 && (
+                        <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                          <Package size={10} className="inline mr-1" />{plugin.dependencies.length} deps
+                        </span>
+                      )}
+                      {plugin.permissions && plugin.permissions.length > 0 && (
+                        <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                          <Shield size={10} className="inline mr-1" />{plugin.permissions.length} perms
+                        </span>
+                      )}
+                      {plugin.license && (
+                        <span className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-100 dark:border-slate-700">
+                          {plugin.license}
+                        </span>
+                      )}
+                      {plugin.configSchema && (
+                        <span className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded-md border border-amber-100 dark:border-amber-900/30">
+                          Configurable
+                        </span>
+                      )}
                     </div>
+                    {(plugin.homepage || plugin.author) && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        {plugin.homepage && (
+                          <a href={plugin.homepage} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-blue-500 transition-colors">
+                            <Globe size={10} /> Homepage
+                          </a>
+                        )}
+                        {plugin.author && (
+                          <span className="flex items-center gap-1">
+                            <Link2 size={10} /> {plugin.author}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
                     {plugin.repo && (
-                      <a 
+                      <a
                         href={`https://github.com/${plugin.repo}`}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -603,6 +692,15 @@ const PluginsPage: React.FC = () => {
             })}
           </div>
         )
+      )}
+      {configPlugin && configPlugin.configSchema && (
+        <PluginConfigDialog
+          pluginId={configPlugin.id}
+          pluginName={configPlugin.name}
+          configSchema={configPlugin.configSchema as Record<string, unknown>}
+          onClose={() => setConfigPlugin(null)}
+          onSaved={() => fetchPlugins()}
+        />
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
+import { useWebSocket } from '../hooks/useWebSocket';
 import apiClient from '../api/client';
 import { FastAverageColor } from 'fast-average-color';
 import type { Chapter } from '../types';
@@ -149,6 +150,8 @@ const Player: React.FC = () => {
     isSeriesEditing
   } = usePlayerStore();
 
+  const { isConnected: wsConnected, sendProgress: wsSendProgress } = useWebSocket();
+
   const audioRef = useRef<HTMLAudioElement>(null);
   const location = useLocation();
   const [isMuted, setIsMuted] = useState(false);
@@ -270,7 +273,7 @@ const Player: React.FC = () => {
 
   const [sleepTimer, setSleepTimer] = useState<number | null>(null);
   const sleepTimerEndTimeRef = useRef<number | null>(null);
-  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressTimerRef = useRef<{ ws: ReturnType<typeof setInterval>; http: ReturnType<typeof setInterval> } | null>(null);
   const sleepTimerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerMenuRef = useRef<HTMLDivElement>(null);
 
@@ -594,31 +597,67 @@ const Player: React.FC = () => {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
 
-  // Sync progress to backend
+  // Sync progress to backend via WebSocket (primary) and HTTP (fallback)
   useEffect(() => {
     if (isPlaying && currentBook && currentChapter) {
       // Skip sync in offline mode
       if (!navigator.onLine || window.location.hash.includes('/offline')) return;
 
-      // Save progress immediately when starting
-      const saveProgress = () => {
+      const saveProgressWs = () => {
+        wsSendProgress(currentBook.id, currentChapter.id, Math.floor(currentTimeRef.current));
+      };
+
+      const saveProgressHttp = () => {
         apiClient.post('/api/progress', {
           bookId: currentBook.id,
           chapterId: currentChapter.id,
           position: Math.floor(currentTimeRef.current)
-        }).catch(err => console.error('Failed to sync progress', err));
+        }).catch(err => console.error('HTTP进度同步失败', err));
       };
 
-      saveProgress();
-      
-      progressTimerRef.current = setInterval(saveProgress, 5000); // Every 5 seconds
+      // Save immediately on start
+      saveProgressWs();
+      saveProgressHttp();
+
+      // WS-based sync every 2 seconds for real-time progress tracking
+      const wsTimer = setInterval(saveProgressWs, 2000);
+      // HTTP fallback sync every 15 seconds
+      const httpTimer = setInterval(saveProgressHttp, 15000);
+
+      progressTimerRef.current = { ws: wsTimer, http: httpTimer };
     } else {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current.ws);
+        clearInterval(progressTimerRef.current.http);
+        progressTimerRef.current = null;
+      }
     }
     return () => {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current.ws);
+        clearInterval(progressTimerRef.current.http);
+        progressTimerRef.current = null;
+      }
     };
-  }, [isPlaying, currentBook, currentChapter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, currentBook?.id, currentChapter?.id]);
+
+  // Save progress immediately when pausing to prevent progress loss
+  const prevIsPlayingRef = useRef(isPlaying);
+  useEffect(() => {
+    const isOffline = !navigator.onLine || window.location.hash.includes('/offline');
+    if (prevIsPlayingRef.current && !isPlaying && currentBook && currentChapter && !isOffline) {
+      const pos = Math.floor(currentTimeRef.current);
+      wsSendProgress(currentBook.id, currentChapter.id, pos);
+      apiClient.post('/api/progress', {
+        bookId: currentBook.id,
+        chapterId: currentChapter.id,
+        position: pos
+      }).catch((err: unknown) => console.error('暂停时保存进度失败', err));
+    }
+    prevIsPlayingRef.current = isPlaying;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
 
   const handleLoadedMetadata = () => {
     if (audioRef.current) {
@@ -795,10 +834,12 @@ const Player: React.FC = () => {
   const handleEnded = () => {
     if (currentBook && currentChapter) {
       if (navigator.onLine && !window.location.hash.includes('/offline')) {
+        const finalPosition = Math.floor(duration);
+        wsSendProgress(currentBook.id, currentChapter.id, finalPosition);
         apiClient.post('/api/progress', {
           bookId: currentBook.id,
           chapterId: currentChapter.id,
-          position: Math.floor(duration)
+          position: finalPosition
         }).catch(err => console.error('Failed to sync final progress', err));
       }
     }

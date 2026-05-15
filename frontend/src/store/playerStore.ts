@@ -14,6 +14,13 @@ const getProgressPosition = (chapter: Chapter) => {
   return typeof value === 'number' ? value : 0;
 };
 
+/** Check if a chapter's progress indicates it has been fully played (>= 95%) */
+function isChapterFinished(chapter: Chapter): boolean {
+  const pos = getProgressPosition(chapter);
+  if (!pos || !chapter.duration || chapter.duration <= 0) return false;
+  return pos / chapter.duration >= 0.95;
+}
+
 interface PlayerState {
   currentBook: Book | null;
   currentChapter: Chapter | null;
@@ -29,7 +36,7 @@ interface PlayerState {
   isCollapsed: boolean;
   isSeriesEditing: boolean;
   chapterProgress: Record<string, number>;
-  
+
   // Actions
   playBook: (book: Book, chapters: Chapter[], startChapterId?: string) => void;
   togglePlay: () => void;
@@ -92,13 +99,17 @@ export const usePlayerStore = create<PlayerState>()(
         }
 
         const { chapterProgress } = get();
-        const resume = isOffline ? (chapterProgress[chapter.id] ?? getProgressPosition(chapter)) : getProgressPosition(chapter);
+        let resume = isOffline ? (chapterProgress[chapter.id] ?? getProgressPosition(chapter)) : getProgressPosition(chapter);
+        // If chapter is finished, restart from beginning
+        if (!isOffline && resume > 0 && chapter.duration && chapter.duration > 0 && resume / chapter.duration >= 0.95) {
+          resume = 0;
+        }
 
-        const newState: Partial<PlayerState> = { 
-          currentBook: book, 
-          chapters, 
-          currentChapter: chapter, 
-          isPlaying: true, 
+        const newState: Partial<PlayerState> = {
+          currentBook: book,
+          chapters,
+          currentChapter: chapter,
+          isPlaying: true,
           currentTime: resume
         };
 
@@ -112,20 +123,20 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
-      
+
       setCurrentTime: (time) => set((state) => {
         const isOffline = typeof window !== 'undefined' && (!navigator.onLine || window.location.hash.includes('/offline'));
         if (!isOffline || !state.currentChapter) return { currentTime: time };
-        return { 
+        return {
           currentTime: time,
           chapterProgress: { ...state.chapterProgress, [state.currentChapter.id]: time }
         };
       }),
-      
+
       setDuration: (duration) => set({ duration }),
-      
+
       setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
-      
+
       setVolume: (volume) => set({ volume }),
 
       setThemeColor: (color) => set({ themeColor: color }),
@@ -134,9 +145,7 @@ export const usePlayerStore = create<PlayerState>()(
         const { currentChapter, chapters, chapterProgress, currentBook } = get();
         if (!currentChapter || !currentBook) return;
 
-        // 确保 chapters 数组不为空且包含当前章节
         if (chapters.length === 0 || !chapters.some(c => c.id === currentChapter.id)) {
-          console.warn('Chapters array is empty or does not contain current chapter, cannot proceed to next chapter');
           return;
         }
 
@@ -164,7 +173,17 @@ export const usePlayerStore = create<PlayerState>()(
       playChapter: (book, chapters, chapter, resumePosition) => {
         const isOffline = typeof window !== 'undefined' && (!navigator.onLine || window.location.hash.includes('/offline'));
         const { chapterProgress } = get();
-        const resume = resumePosition ?? (isOffline ? (chapterProgress[chapter.id] ?? getProgressPosition(chapter)) : getProgressPosition(chapter));
+
+        let resume: number;
+        if (resumePosition !== undefined) {
+          resume = resumePosition;
+        } else if (!isOffline && isChapterFinished(chapter)) {
+          // Clicking a finished chapter clears its progress and restarts from beginning
+          resume = 0;
+        } else {
+          resume = isOffline ? (chapterProgress[chapter.id] ?? getProgressPosition(chapter)) : getProgressPosition(chapter);
+        }
+
         const newState: Partial<PlayerState> = {
           currentBook: book,
           chapters,
@@ -172,7 +191,7 @@ export const usePlayerStore = create<PlayerState>()(
           isPlaying: true,
           currentTime: resume
         };
-        
+
         if (book.themeColor && !isTooLight(book.themeColor)) {
           newState.themeColor = book.themeColor;
         } else {
