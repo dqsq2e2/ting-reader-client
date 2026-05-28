@@ -283,6 +283,7 @@ const Player: React.FC = () => {
   const [autoCache, setAutoCache] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [shouldTranscode, setShouldTranscode] = useState(false);
+  const [seekOffset, setSeekOffset] = useState<number | null>(null);
   const isInitialLoadRef = useRef(true);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -291,8 +292,16 @@ const Player: React.FC = () => {
     if (shouldTranscode) {
       url += '&transcode=mp3';
     }
+    // Add seek parameter for transcoded streams (FFmpeg pipe doesn't support Range requests)
+    if (shouldTranscode && seekOffset !== null && seekOffset > 0) {
+      url += `&seek=${seekOffset}`;
+    }
+    // Add retry count to force URL refresh
+    if (retryCount > 0) {
+      url += `&retry=${retryCount}`;
+    }
     return url;
-  }, [API_BASE_URL, token, shouldTranscode]);
+  }, [API_BASE_URL, token, shouldTranscode, seekOffset, retryCount]);
 
   // Fetch settings for auto_preload
   useEffect(() => {
@@ -360,17 +369,32 @@ const Player: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Reset initial load ref when chapter changes
+  // Reset all playback state when chapter ID changes
   useEffect(() => {
     isInitialLoadRef.current = true;
-    
-    // Move all state resets to microtask to avoid "setState in effect"
-    queueMicrotask(() => {
-      setShouldTranscode(false);
+    setShouldTranscode(false);
+    setSeekOffset(null);
+    setTimeout(() => {
       setBufferedTime(0);
       setRetryCount(0);
-    });
+    }, 0);
+
+    // 立即从章节数据设置时长，不等待音频加载
+    if (currentChapter?.duration && currentChapter.duration > 0) {
+      setDuration(currentChapter.duration);
+    } else {
+      setDuration(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentChapter?.id]);
+
+  // Update duration display when chapter duration is updated (e.g., after FFprobe)
+  // without resetting shouldTranscode or retryCount
+  useEffect(() => {
+    if (currentChapter?.duration && currentChapter.duration > 0) {
+      setDuration(currentChapter.duration);
+    }
+  }, [currentChapter?.duration, setDuration]);
 
   // Reset initial load ref when retrying (to allow resume logic to run again)
   useEffect(() => {
@@ -403,7 +427,7 @@ const Player: React.FC = () => {
     } else {
       audioRef.current.pause();
     }
-  }, [isPlaying, currentChapter, retryCount]);
+  }, [isPlaying, currentChapter?.id, retryCount, shouldTranscode, seekOffset]);
 
   // Preload and Server-side Cache next chapter logic
   useEffect(() => {
@@ -446,19 +470,22 @@ const Player: React.FC = () => {
   const handleTimeUpdate = () => {
     if (!audioRef.current) return;
     
-    const time = audioRef.current.currentTime;
+    const rawTime = audioRef.current.currentTime;
+    // For transcoded streams with server-side seek, add the seekOffset
+    // because FFmpeg -ss output starts from 0 but represents audio at seekOffset
+    const time = (shouldTranscode && seekOffset !== null && seekOffset > 0) ? rawTime + seekOffset : rawTime;
     
     // Prevent overwriting persisted progress with 0 on initial load
     // If we are at the very beginning (time < 0.5) but store has significant progress (> 2s),
     // ignore this update until we've resumed properly.
-    if (isInitialLoadRef.current && time < 0.5 && currentTime > 2) {
+    if (isInitialLoadRef.current && rawTime < 0.5 && currentTime > 2) {
       return;
     }
 
     // Mark initial load as done if we have successfully played past 1s
     // This ensures that subsequent retries (which might reset time to 0) are handled correctly
     // by the retryCount effect resetting isInitialLoadRef to true
-    if (isInitialLoadRef.current && time > 1) {
+    if (isInitialLoadRef.current && rawTime > 1) {
        isInitialLoadRef.current = false;
     }
 
@@ -663,11 +690,16 @@ const Player: React.FC = () => {
     if (audioRef.current) {
       let browserDuration = audioRef.current.duration;
 
-      // Handle infinite duration (common in streaming/transcoding)
-      if (!Number.isFinite(browserDuration) || isNaN(browserDuration)) {
-        if (currentChapter?.duration) {
-          browserDuration = currentChapter.duration;
-        }
+      // 优先使用章节数据中的时长（数据库中已有）
+      if (currentChapter?.duration && currentChapter.duration > 0) {
+        browserDuration = currentChapter.duration;
+      }
+      // 只在章节数据中没有时长时，才使用浏览器返回的时长
+      else if (Number.isFinite(browserDuration) && !isNaN(browserDuration) && browserDuration > 0) {
+        // use browser duration
+      }
+      else {
+        browserDuration = 0;
       }
 
       setDuration(browserDuration);
@@ -726,10 +758,24 @@ const Player: React.FC = () => {
   const handleSeekEnd = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     setIsSeeking(false);
+
     if (audioRef.current) {
-      audioRef.current.currentTime = time;
+      // For transcoded streams, native seeking won't work (no Range support)
+      // Detect by checking if seekable ranges are empty or if we're in transcode mode
+      const isNonSeekable = shouldTranscode || audioRef.current.seekable.length === 0;
+
+      if (isNonSeekable && shouldTranscode) {
+        // Reload audio with seek parameter (server-side seek via FFmpeg -ss)
+        setSeekOffset(time);
+        setCurrentTime(time);
+        isInitialLoadRef.current = false;
+      } else {
+        audioRef.current.currentTime = time;
+        setCurrentTime(time);
+      }
+    } else {
+      setCurrentTime(time);
     }
-    setCurrentTime(time);
   };
 
   const formatTime = (time: number) => {
