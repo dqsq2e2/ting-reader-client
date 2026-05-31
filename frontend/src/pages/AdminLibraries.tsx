@@ -82,28 +82,29 @@ const ScraperConfigurator = ({
   const preferAudioTitle = config.preferAudioTitle ?? config.prefer_audio_title ?? false;
   const extractAudioCover = config.extractAudioCover ?? config.extract_audio_cover ?? true;
   const disableWatcher = config.disableWatcher ?? config.disable_watcher ?? false;
+  const cloudMode = config.cloudMode ?? config.cloud_mode ?? false;
 
   const handleNfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, nfoWritingEnabled: e.target.checked };
-      delete newConfig.nfo_writing_enabled;
+      delete (newConfig as any).nfo_writing_enabled;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleMetadataWritingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, metadataWritingEnabled: e.target.checked };
-      delete newConfig.metadata_writing_enabled;
+      delete (newConfig as any).metadata_writing_enabled;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handlePreferAudioTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, preferAudioTitle: e.target.checked };
-      delete newConfig.prefer_audio_title;
+      delete (newConfig as any).prefer_audio_title;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleExtractAudioCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, extractAudioCover: e.target.checked };
-      delete newConfig.extract_audio_cover;
+      delete (newConfig as any).extract_audio_cover;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -111,7 +112,13 @@ const ScraperConfigurator = ({
       // e.target.checked is true when user wants to ENABLE watcher
       // so disableWatcher should be the opposite (!e.target.checked)
       const newConfig = { ...config, disableWatcher: !e.target.checked };
-      delete newConfig.disable_watcher;
+      delete (newConfig as any).disable_watcher;
+      onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handleCloudModeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newConfig = { ...config, cloudMode: e.target.checked };
+      delete (newConfig as any).cloud_mode;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -225,6 +232,25 @@ const ScraperConfigurator = ({
             </label>
             <span className="text-[10px] text-slate-400">
               开启后，系统/插件将尝试从音频文件中提取并保存封面
+            </span>
+          </div>
+        </div>
+
+        {/* Cloud / Drive Mode - applies to both WebDAV and local libraries */}
+        <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+          <input 
+            type="checkbox" 
+            id="cloud-mode" 
+            checked={cloudMode} 
+            onChange={handleCloudModeChange}
+            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
+          />
+          <div className="flex flex-col">
+            <label htmlFor="cloud-mode" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+              网盘模式（减少远程音频探测）
+            </label>
+            <span className="text-[10px] text-slate-400">
+              WebDAV 库开启后，仅使用 book.nfo / metadata.json / 封面等刮削文件，不再从音频文件读取元数据；本地库开启后，.strm 文件将不再探测远程音频时长。
             </span>
           </div>
         </div>
@@ -360,7 +386,8 @@ const DEFAULT_SCRAPER_CONFIG = JSON.stringify({
   preferAudioTitle: false,
   nfoWritingEnabled: false,
   metadataWritingEnabled: false,
-  disableWatcher: false
+  disableWatcher: false,
+  cloudMode: false,
 }, null, 2);
 
 const AdminLibraries: React.FC = () => {
@@ -470,7 +497,8 @@ const AdminLibraries: React.FC = () => {
       const payload = {
         url: formData.url,
         username: formData.username || null,
-        password: formData.password || null
+        password: formData.password || null,
+        root_path: formData.rootPath || null
       };
       
       const response = await apiClient.post('/api/libraries/test-connection', payload);
@@ -807,7 +835,7 @@ const AdminLibraries: React.FC = () => {
                 ) : (
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">选择本地路径 (相对项目 storage/ 目录)</label>
+                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">选择本地路径 (相对 storage/ 目录)</label>
                       <div className="relative">
                         {/* Selector Trigger */}
                         <button
@@ -910,9 +938,6 @@ const AdminLibraries: React.FC = () => {
                           </div>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-400 pl-1">
-                        提示：音频文件必须放置在后端 <strong>backend/storage/</strong> 目录下
-                      </p>
                     </div>
                   </div>
                 )}

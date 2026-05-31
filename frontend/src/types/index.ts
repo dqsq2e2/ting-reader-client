@@ -19,6 +19,7 @@ export interface ScraperConfig {
   prefer_audio_title?: boolean;
   metadataPriority?: string[];
   extractAudioCover?: boolean;
+  cloudMode?: boolean;
 }
 
 export interface Library {
