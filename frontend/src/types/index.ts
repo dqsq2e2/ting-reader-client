@@ -19,7 +19,6 @@ export interface ScraperConfig {
   prefer_audio_title?: boolean;
   metadataPriority?: string[];
   extractAudioCover?: boolean;
-  cloudMode?: boolean;
 }
 
 export interface Library {
@@ -41,9 +40,10 @@ export interface Book {
   title: string;
   author?: string;
   narrator?: string;
-  genre?: string;
   description?: string;
   coverUrl?: string;
+  duration?: number;
+  size?: number;
   themeColor?: string;
   path: string;
   hash: string;
@@ -54,8 +54,9 @@ export interface Book {
   skipIntro?: number;
   skipOutro?: number;
   tags?: string;
-  chapterRegex?: string;
+  genre?: string;
   year?: number;
+  chapterRegex?: string;
 }
 
 export interface Chapter {
@@ -111,7 +112,7 @@ export interface Plugin {
   state: 'active' | 'inactive' | 'loading' | 'failed';
   runtime?: string;
   license?: string;
-  homepage?: string;
+  repo?: string;
   descriptionEn?: string;
   isEnabled?: boolean;
   entryPoint?: string;
@@ -125,6 +126,47 @@ export interface Plugin {
   successRate?: number;
   stats?: PluginStats;
   error?: string;
+}
+
+export interface ScraperSearchField {
+  key: string;
+  label: string;
+  required?: boolean;
+  type?: string;
+  fieldType?: string;
+  placeholder?: string;
+  defaultFrom?: string;
+}
+
+export interface ScraperSource {
+  id: string;
+  name: string;
+  description?: string;
+  version: string;
+  enabled: boolean;
+  autoScrape: boolean;
+  searchFields: ScraperSearchField[];
+  resultFields: string[];
+}
+
+export interface ScraperSearchItem {
+  id: string;
+  title?: string;
+  author?: string;
+  narrator?: string | null;
+  coverUrl?: string | null;
+  cover_url?: string | null;
+  intro?: string | null;
+  description?: string | null;
+  tags?: string[];
+  genre?: string | null;
+  subtitle?: string | null;
+  publishedYear?: string | null;
+  published_year?: string | null;
+  duration?: number | null;
+  chapterCount?: number | null;
+  chapter_count?: number | null;
+  [key: string]: unknown;
 }
 
 export interface StorePlugin {
@@ -142,7 +184,6 @@ export interface StorePlugin {
   dependencies?: string[];
   runtime?: string;
   license?: string;
-  homepage?: string;
   author?: string;
   descriptionEn?: string;
   permissions?: string[];
@@ -150,18 +191,23 @@ export interface StorePlugin {
   supportedExtensions?: string[];
   minCoreVersion?: string;
   downloads?: { name: string; url: string }[];
+  scraper?: {
+    autoScrape?: boolean;
+    searchFields?: ScraperSearchField[];
+    resultFields?: string[];
+  };
 }
 
 export interface MergeSuggestion {
   id: string;
-  sourceBookId: string;
-  sourceBookTitle: string;
-  targetBookId: string;
-  targetBookTitle: string;
+  source_book_id: string;
+  source_book_title: string;
+  target_book_id: string;
+  target_book_title: string;
   score: number;
   reason: string;
   status: 'pending' | 'merged' | 'ignored';
-  createdAt: string;
+  created_at: string;
 }
 
 export interface BookMetadata {
@@ -169,29 +215,33 @@ export interface BookMetadata {
   author: string;
   narrator: string;
   description: string;
-  coverUrl: string;
+  cover_url: string;
   tags?: string[];
+  genre?: string;
 }
 
 export interface ChapterChange {
   index: number;
-  currentTitle: string | null;
-  scrapedTitle: string | null;
+  current_title: string | null;
+  scraped_title: string | null;
   status: 'match' | 'update' | 'missing' | 'new';
+}
+
+export interface Series {
+  id: string;
+  libraryId: string;
+  title: string;
+  author?: string;
+  narrator?: string;
+  description?: string;
+  coverUrl?: string;
+  createdAt: string;
+  updatedAt?: string;
+  books?: Book[];
 }
 
 export interface ScrapeDiff {
   current: BookMetadata;
   scraped: BookMetadata;
-  chapterChanges: ChapterChange[];
-}
-
-declare global {
-  interface Window {
-    electronAPI?: {
-      openExternal: (url: string) => Promise<void>;
-      getVersion?: () => Promise<string>;
-      platform?: string;
-    };
-  }
+  chapter_changes: ChapterChange[];
 }

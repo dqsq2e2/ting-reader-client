@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
-import type { Library } from '../types';
+import type { Library, ScraperSource } from '../types';
 import { 
   Plus, 
   Database, 
@@ -25,7 +25,7 @@ const ScraperConfigurator = ({
   libraryType
 }: { 
   configStr: string, 
-  sources: {id: string, name: string}[], 
+  sources: Pick<ScraperSource, 'id' | 'name' | 'autoScrape'>[],
   onChange: (newConfigStr: string) => void,
   libraryType: string
 }) => {
@@ -41,10 +41,12 @@ const ScraperConfigurator = ({
     { id: 'tags', label: '标签', key: 'tagsSources' },
   ];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let config: Record<string, any> = {};
+  let config: Record<string, unknown> = {};
   try {
-    config = configStr ? JSON.parse(configStr) : {};
+    const parsed = configStr ? JSON.parse(configStr) : {};
+    config = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
   } catch {
     config = {};
   }
@@ -70,11 +72,19 @@ const ScraperConfigurator = ({
     { id: 'scraper', name: '刮削器 (Plugins)' }
   ];
 
-  let activeIds: string[] = config[currentKey] ?? config[snakeCaseMap[currentKey]] ?? [];
+  const toStringArray = (value: unknown): string[] => (
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+  );
+
+  let activeIds = toStringArray(config[currentKey] ?? config[snakeCaseMap[currentKey]]);
   
   // Initialize default priority if empty
   if (activeTab === 'priority' && activeIds.length === 0) {
       activeIds = ['local_metadata', 'audio_metadata', 'scraper'];
+  }
+  if (activeTab !== 'priority') {
+    const autoSourceIds = new Set(sources.map(source => source.id));
+    activeIds = activeIds.filter(id => autoSourceIds.has(id));
   }
 
   const nfoEnabled = config.nfoWritingEnabled ?? config.nfo_writing_enabled ?? false;
@@ -86,25 +96,25 @@ const ScraperConfigurator = ({
 
   const handleNfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, nfoWritingEnabled: e.target.checked };
-      delete (newConfig as any).nfo_writing_enabled;
+      delete newConfig.nfo_writing_enabled;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleMetadataWritingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, metadataWritingEnabled: e.target.checked };
-      delete (newConfig as any).metadata_writing_enabled;
+      delete newConfig.metadata_writing_enabled;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handlePreferAudioTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, preferAudioTitle: e.target.checked };
-      delete (newConfig as any).prefer_audio_title;
+      delete newConfig.prefer_audio_title;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleExtractAudioCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, extractAudioCover: e.target.checked };
-      delete (newConfig as any).extract_audio_cover;
+      delete newConfig.extract_audio_cover;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -112,13 +122,13 @@ const ScraperConfigurator = ({
       // e.target.checked is true when user wants to ENABLE watcher
       // so disableWatcher should be the opposite (!e.target.checked)
       const newConfig = { ...config, disableWatcher: !e.target.checked };
-      delete (newConfig as any).disable_watcher;
+      delete newConfig.disable_watcher;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleCloudModeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, cloudMode: e.target.checked };
-      delete (newConfig as any).cloud_mode;
+      delete newConfig.cloud_mode;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -400,7 +410,7 @@ const AdminLibraries: React.FC = () => {
   const [availableFolders, setAvailableFolders] = useState<{name: string, path: string}[]>([]);
   const [currentBrowsePath, setCurrentBrowsePath] = useState('');
   const [isFolderMenuOpen, setIsFolderMenuOpen] = useState(false);
-  const [scraperSources, setScraperSources] = useState<{id: string, name: string}[]>([]);
+  const [scraperSources, setScraperSources] = useState<Pick<ScraperSource, 'id' | 'name' | 'autoScrape'>[]>([]);
   const [showJsonEditor, setShowJsonEditor] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   
@@ -424,7 +434,7 @@ const AdminLibraries: React.FC = () => {
     try {
       const response = await apiClient.get('/api/scraper/sources');
       if (response.data && response.data.sources) {
-        setScraperSources(response.data.sources);
+        setScraperSources((response.data.sources as ScraperSource[]).filter(source => source.autoScrape));
       }
     } catch (err) {
       console.error('获取刮削源失败', err);
